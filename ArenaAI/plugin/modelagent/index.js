@@ -1,0 +1,441 @@
+(function () {
+  'use strict';
+  var ID = 'modelagent';
+  if (window.__modelAgentLoaded) return;
+  window.__modelAgentLoaded = true;
+
+  var state = {
+    apiKey: '',
+    models: [],
+    selected: { build: '', dialogue: '', chat: '' },
+    agent: 'build',
+    messages: [],
+    busy: false,
+    aborter: null,
+    lastPlan: '',
+    lastArenaPreview: '',
+    webSearch: false
+  };
+
+  var AGENTS = {
+    build: {
+      label: 'Build',
+      role: 'Arquiteto técnico e gerente de execução. Você planeja tarefas de engenharia de software, decompõe em etapas pequenas, identifica arquivos e riscos, e prepara instruções precisas para outro modelo executar dentro do Arena AI.',
+      system: 'Você é o agente gerente do ModelAgent. O modelo da Arena AI será o engenheiro executor. Analise o objetivo, transforme-o em um plano técnico acionável e produza uma mensagem final para o executor. Não afirme que alterou arquivos. Não invente estrutura do projeto. Quando não houver contexto suficiente, declare hipóteses e peça inspeção. Prefira mudanças pequenas, testáveis e reversíveis. A mensagem de handoff deve conter objetivo, contexto, escopo permitido, arquivos que podem ser tocados (se conhecidos), restrições, critérios de aceitação e validação. Não permita que o executor altere arquivos fora do escopo.',
+      temperature: 0.25,
+      maxTokens: 1800
+    },
+    dialogue: {
+      label: 'Diálogo',
+      role: 'Agente generalista para pesquisa, análise, planejamento, redação e tarefas pontuais.',
+      system: 'Você é o agente Diálogo do ModelAgent. Responda com rigor, organize pesquisas e tarefas em etapas verificáveis, diferencie fatos de hipóteses e use ferramentas de pesquisa quando habilitadas. Seja completo sem desperdiçar tokens.',
+      temperature: 0.45,
+      maxTokens: 2200
+    },
+    chat: {
+      label: 'Chat',
+      role: 'Assistente para perguntas curtas e respostas diretas.',
+      system: 'Você é o agente Chat do ModelAgent. Responda diretamente, com precisão e concisão. Não elabore planos longos sem necessidade.',
+      temperature: 0.35,
+      maxTokens: 700
+    }
+  };
+
+  var host = document.createElement('div');
+  host.id = 'modelagent-host';
+  host.style.cssText = 'all:initial;position:relative;z-index:2147483000;';
+  (document.documentElement || document.body).appendChild(host);
+  var shadow = host.attachShadow({ mode: 'open' });
+
+  function el(tag, attrs, children) {
+    var node = document.createElement(tag);
+    Object.keys(attrs || {}).forEach(function (k) {
+      if (k === 'class') node.className = attrs[k];
+      else if (k === 'text') node.textContent = attrs[k];
+      else if (k === 'html') node.innerHTML = attrs[k];
+      else if (k.slice(0, 2) === 'on') node.addEventListener(k.slice(2).toLowerCase(), attrs[k]);
+      else node.setAttribute(k, attrs[k]);
+    });
+    (children || []).forEach(function (child) { node.appendChild(typeof child === 'string' ? document.createTextNode(child) : child); });
+    return node;
+  }
+
+  var styleLink = document.createElement('link');
+  styleLink.rel = 'stylesheet';
+  styleLink.href = '';
+  var css = "";
+  // CSS file is loaded by the add-on manager through the SDK; this fallback keeps the UI usable
+  // if a host build does not inject manifest styles.
+  var style = document.createElement('style');
+  style.textContent = css;
+  shadow.appendChild(style);
+
+  var root = el('div', { id: 'ma-root' });
+  var launch = el('button', { id: 'ma-launch', title: 'Abrir ModelAgent', text: 'MA' });
+  var panel = el('section', { id: 'ma-panel', role: 'dialog', 'aria-label': 'ModelAgent' });
+  shadow.appendChild(root);
+  root.appendChild(launch);
+  root.appendChild(panel);
+
+  function setStatus(message, kind) {
+    var node = shadow.getElementById('ma-status');
+    if (!node) return;
+    node.textContent = message || '';
+    node.className = 'ma-status' + (kind ? ' ' + kind : '');
+  }
+
+  function safeText(v) { return String(v == null ? '' : v); }
+  function money(value) {
+    var n = Number(value);
+    if (!Number.isFinite(n)) return 'n/d';
+    if (n === 0) return 'grátis';
+    return '$' + n.toFixed(n < 0.001 ? 8 : 6).replace(/0+$/, '').replace(/\\.$/, '');
+  }
+  function isFree(m) {
+    var p = m && m.pricing || {};
+    return (String(m.id || '').endsWith(':free')) ||
+      (Number(p.prompt) === 0 && Number(p.completion) === 0);
+  }
+  function modality(m, key) {
+    var v = m && m.architecture && m.architecture[key];
+    return Array.isArray(v) ? v.join(', ') : safeText(v || 'text');
+  }
+  function modelById(id) {
+    return state.models.find(function (m) { return m.id === id; }) || null;
+  }
+
+  function apiFetch(path, options) {
+    if (!state.apiKey) return Promise.reject(new Error('Informe sua chave OpenRouter.'));
+    var headers = Object.assign({
+      'Authorization': 'Bearer ' + state.apiKey,
+      'Content-Type': 'application/json',
+      'HTTP-Referer': 'https://arena.ai/agent',
+      'X-OpenRouter-Title': 'ArenaAI ModelAgent'
+    }, options && options.headers || {});
+    return fetch('https://openrouter.ai/api/v1' + path, Object.assign({}, options || {}, { headers: headers }));
+  }
+
+  function loadModels() {
+    setStatus('Carregando catálogo OpenRouter…');
+    return apiFetch('/models', { method: 'GET' }).then(function (r) {
+      if (!r.ok) return r.text().then(function (t) { throw new Error('OpenRouter ' + r.status + ': ' + t.slice(0, 240)); });
+      return r.json();
+    }).then(function (json) {
+      state.models = (json.data || []).filter(function (m) { return m && m.id; });
+      state.models.sort(function (a, b) {
+        var f = Number(isFree(b)) - Number(isFree(a));
+        return f || safeText(a.name || a.id).localeCompare(safeText(b.name || b.id));
+      });
+      ['build', 'dialogue', 'chat'].forEach(function (a) {
+        if (!state.selected[a] || !modelById(state.selected[a])) {
+          var candidate = state.models.find(function (m) { return isFree(m); }) || state.models[0];
+          state.selected[a] = candidate ? candidate.id : '';
+        }
+      });
+      render();
+      setStatus(state.models.length + ' modelos carregados.', 'ok');
+    }).catch(function (e) {
+      setStatus(e.message || 'Falha ao carregar modelos.', 'error');
+      throw e;
+    });
+  }
+
+  function modelDetails(m) {
+    if (!m) return '<div class="ma-note">Selecione um modelo para ver os detalhes.</div>';
+    var p = m.pricing || {}, tp = m.top_provider || {};
+    var input = modality(m, 'input_modalities'), output = modality(m, 'output_modalities');
+    var tools = Array.isArray(m.supported_parameters) && m.supported_parameters.indexOf('tools') >= 0;
+    var values = [
+      ['ID', m.id], ['Contexto total', Number(m.context_length || 0).toLocaleString()],
+      ['Saída máxima', Number(tp.max_completion_tokens || m.top_provider && m.top_provider.max_completion_tokens || 0).toLocaleString()],
+      ['Entrada', input], ['Saída', output], ['Tools', tools ? 'Suportado' : 'Não listado'],
+      ['Prompt / 1M tokens', money(Number(p.prompt || 0) * 1000000)],
+      ['Completion / 1M tokens', money(Number(p.completion || 0) * 1000000)]
+    ];
+    return '<div class="ma-details">' + values.map(function (v) {
+      return '<div class="ma-detail"><span>' + escapeHtml(v[0]) + '</span><b>' + escapeHtml(safeText(v[1])) + '</b></div>';
+    }).join('') + '</div>';
+  }
+  function escapeHtml(s) {
+    return safeText(s).replace(/[&<>"']/g, function (c) {
+      return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c];
+    });
+  }
+
+  function renderModelPicker() {
+    var selected = modelById(state.selected[state.agent]);
+    var box = el('div', { class: 'ma-modelbox' });
+    var top = el('div', { class: 'ma-modeltop' });
+    var select = el('select', { class: 'ma-select', 'aria-label': 'Modelo do agente' });
+    state.models.forEach(function (m) {
+      var opt = el('option', { value: m.id, text: (isFree(m) ? 'FREE · ' : '') + (m.name || m.id) + ' — ' + m.id });
+      if (m.id === state.selected[state.agent]) opt.selected = true;
+      select.appendChild(opt);
+    });
+    select.addEventListener('change', function () {
+      state.selected[state.agent] = select.value;
+      render();
+    });
+    var refresh = el('button', { class: 'ma-btn', text: '↻', title: 'Atualizar modelos', onclick: function () { loadModels().catch(function () {}); } });
+    top.appendChild(select); top.appendChild(refresh); box.appendChild(top);
+    var detail = el('details', {});
+    detail.open = false;
+    detail.appendChild(el('summary', { class: 'ma-modelrow', text: 'Detalhes completos do modelo  ▾' }));
+    var details = el('div', { html: modelDetails(selected) });
+    detail.appendChild(details);
+    box.appendChild(detail);
+    return box;
+  }
+
+  function addMessage(role, content) {
+    state.messages.push({ role: role, content: content });
+    if (state.messages.length > 40) state.messages.splice(0, state.messages.length - 40);
+    renderMessages();
+  }
+  function renderMessages() {
+    var list = shadow.getElementById('ma-messages');
+    if (!list) return;
+    list.replaceChildren();
+    if (!state.messages.length) {
+      list.appendChild(el('div', { class: 'ma-empty', text: 'Escolha um agente e envie sua primeira mensagem.' }));
+      return;
+    }
+    state.messages.forEach(function (m) {
+      var node = el('div', { class: 'ma-msg ' + (m.role === 'user' ? 'user' : '') });
+      node.appendChild(el('div', { class: 'meta', text: m.role === 'user' ? 'VOCÊ' : 'MODELAGENT' }));
+      node.appendChild(document.createTextNode(m.content));
+      list.appendChild(node);
+    });
+    list.scrollTop = list.scrollHeight;
+  }
+
+  function streamCompletion(messages, onToken) {
+    var model = state.selected[state.agent];
+    if (!model) return Promise.reject(new Error('Selecione um modelo.'));
+    var body = {
+      model: model,
+      messages: messages,
+      stream: true,
+      temperature: AGENTS[state.agent].temperature,
+      max_tokens: AGENTS[state.agent].maxTokens,
+      usage: { include: true }
+    };
+    if (state.webSearch && state.agent === 'dialogue') body.plugins = [{ id: 'web' }];
+    state.aborter = new AbortController();
+    return apiFetch('/chat/completions', {
+      method: 'POST',
+      signal: state.aborter.signal,
+      body: JSON.stringify(body)
+    }).then(function (r) {
+      if (!r.ok) return r.text().then(function (t) { throw new Error('OpenRouter ' + r.status + ': ' + t.slice(0, 500)); });
+      if (!r.body || !r.body.getReader) throw new Error('Streaming não suportado neste WebView.');
+      var reader = r.body.getReader(), decoder = new TextDecoder('utf-8'), buffer = '';
+      function read() {
+        return reader.read().then(function (part) {
+          if (part.done) return;
+          buffer += decoder.decode(part.value, { stream: true });
+          var lines = buffer.split(/\\r?\\n/);
+          buffer = lines.pop() || '';
+          lines.forEach(function (line) {
+            if (line.indexOf('data:') !== 0) return;
+            var data = line.slice(5).trim();
+            if (!data || data === '[DONE]') return;
+            try {
+              var parsed = JSON.parse(data);
+              var delta = parsed.choices && parsed.choices[0] && parsed.choices[0].delta;
+              if (delta && typeof delta.content === 'string') onToken(delta.content);
+            } catch (_) {}
+          });
+          return read();
+        });
+      }
+      return read();
+    });
+  }
+
+  function sendChat(text) {
+    if (state.busy || !text.trim()) return;
+    if (!state.apiKey) { setStatus('Configure sua chave OpenRouter primeiro.', 'error'); return; }
+    state.busy = true;
+    var input = text.trim();
+    addMessage('user', input);
+    var output = '';
+    state.messages.push({ role: 'assistant', content: '' });
+    render();
+    var history = state.messages.slice(0, -1).map(function (m) { return { role: m.role, content: m.content }; });
+    var messages = [{ role: 'system', content: AGENTS[state.agent].system }].concat(history);
+    var bubbleIndex = state.messages.length - 1;
+    setStatus('Agente ' + AGENTS[state.agent].label + ' trabalhando…');
+    streamCompletion(messages, function (token) {
+      output += token;
+      state.messages[bubbleIndex].content = output;
+      renderMessages();
+    }).then(function () {
+      state.lastPlan = state.agent === 'build' ? output : state.lastPlan;
+      setStatus('Resposta concluída.', 'ok');
+    }).catch(function (e) {
+      if (e.name !== 'AbortError') setStatus(e.message || 'Erro na geração.', 'error');
+      state.messages[bubbleIndex].content = output || '[Geração interrompida ou sem conteúdo.]';
+      renderMessages();
+    }).finally(function () {
+      state.busy = false; state.aborter = null; renderControls();
+    });
+    renderControls();
+  }
+
+  function visible(elm) {
+    if (!elm || !elm.isConnected) return false;
+    var r = elm.getBoundingClientRect(), s = getComputedStyle(elm);
+    return r.width > 0 && r.height > 0 && s.display !== 'none' && s.visibility !== 'hidden';
+  }
+  function findComposer() {
+    var selectors = [
+      'textarea[placeholder*="Ask" i]', 'textarea[placeholder*="message" i]',
+      'textarea[placeholder*="pergunt" i]', 'textarea',
+      '[contenteditable="true"][role="textbox"]', '[contenteditable="true"]',
+      '[role="textbox"]'
+    ];
+    for (var i = 0; i < selectors.length; i++) {
+      var nodes = Array.from(document.querySelectorAll(selectors[i])).filter(visible);
+      var valid = nodes.find(function (n) {
+        if (host.contains(n)) return false;
+        var aria = (n.getAttribute('aria-label') || '') + ' ' + (n.getAttribute('placeholder') || '');
+        var rect = n.getBoundingClientRect();
+        return rect.width > 180 && rect.height > 24 &&
+          !/search|pesquisa|buscar/i.test(aria);
+      });
+      if (valid) return valid;
+    }
+    return null;
+  }
+  function insertIntoArena(text) {
+    var composer = findComposer();
+    if (!composer) throw new Error('Não encontrei o campo de mensagem da Arena AI. Abra uma conversa e tente novamente.');
+    composer.focus();
+    if (composer.isContentEditable || composer.getAttribute('contenteditable') === 'true') {
+      composer.textContent = text;
+      composer.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: text }));
+    } else {
+      var proto = composer.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+      var setter = Object.getOwnPropertyDescriptor(proto, 'value');
+      if (setter && setter.set) setter.set.call(composer, text);
+      else composer.value = text;
+      composer.dispatchEvent(new Event('input', { bubbles: true }));
+      composer.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+    composer.focus();
+    composer.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    return true;
+  }
+
+  function buildPanel() {
+    panel.replaceChildren();
+    var header = el('header', { class: 'ma-head' });
+    var brand = el('div', { class: 'ma-brand' }, [
+      el('div', { class: 'ma-mark', text: 'M' }),
+      el('div', {}, [
+        el('div', { text: 'ModelAgent' }),
+        el('div', { class: 'ma-sub', text: 'OpenRouter · Arena AI bridge' })
+      ])
+    ]);
+    header.appendChild(brand);
+    header.appendChild(el('button', { class: 'ma-iconbtn', text: '×', title: 'Fechar', onclick: function () { panel.classList.remove('open'); } }));
+    panel.appendChild(header);
+
+    var tabs = el('nav', { class: 'ma-tabs' });
+    ['build', 'dialogue', 'chat'].forEach(function (id) {
+      tabs.appendChild(el('button', {
+        class: 'ma-tab' + (state.agent === id ? ' active' : ''),
+        text: AGENTS[id].label,
+        onclick: function () { state.agent = id; render(); }
+      }));
+    });
+    panel.appendChild(tabs);
+
+    var config = el('div', { class: 'ma-config' });
+    var key = el('input', { class: 'ma-input', type: 'password', placeholder: 'OpenRouter API Key (sk-or-...)', autocomplete: 'off' });
+    key.value = state.apiKey;
+    key.addEventListener('input', function () { state.apiKey = key.value.trim(); });
+    config.appendChild(key);
+    config.appendChild(el('button', { class: 'ma-btn', text: 'Conectar', onclick: function () { state.apiKey = key.value.trim(); loadModels().catch(function () {}); } }));
+    panel.appendChild(config);
+
+    var section = el('div', { class: 'ma-section' });
+    section.appendChild(el('div', { class: 'ma-label', text: 'Modelo do agente ' + AGENTS[state.agent].label }));
+    section.appendChild(renderModelPicker());
+    if (state.agent === 'dialogue') {
+      var check = el('label', { class: 'ma-check' });
+      var cb = el('input', { type: 'checkbox' }); cb.checked = state.webSearch;
+      cb.addEventListener('change', function () { state.webSearch = cb.checked; });
+      check.appendChild(cb); check.appendChild(document.createTextNode('Habilitar pesquisa web (plugin OpenRouter)'));
+      section.appendChild(check);
+    }
+
+    if (state.agent === 'build') {
+      section.appendChild(el('div', { class: 'ma-note', text: 'O ModelAgent atua como gerente: cria um plano técnico e prepara o handoff. Você revisa e insere a instrução no chat da Arena AI; o envio continua manual.' }));
+    }
+    section.appendChild(el('div', { class: 'ma-divider' }));
+    var chat = el('div', { class: 'ma-chat' });
+    chat.appendChild(el('div', { id: 'ma-messages', class: 'ma-messages' }));
+    var textarea = el('textarea', { id: 'ma-prompt', class: 'ma-textarea', placeholder: state.agent === 'build' ? 'Descreva o projeto, objetivo, restrições e resultado esperado…' : 'Escreva sua mensagem…' });
+    chat.appendChild(textarea);
+    var actions = el('div', { class: 'ma-actions' });
+    var send = el('button', { id: 'ma-send', class: 'ma-btn primary', text: state.agent === 'build' ? 'Gerar plano' : 'Enviar', onclick: function () { sendChat(textarea.value); textarea.value = ''; } });
+    actions.appendChild(send);
+    actions.appendChild(el('button', { class: 'ma-btn', text: 'Parar', onclick: function () { if (state.aborter) state.aborter.abort(); } }));
+    if (state.agent === 'build') {
+      actions.appendChild(el('button', { class: 'ma-btn', text: 'Inserir na Arena', onclick: function () {
+        var plan = state.lastPlan || (state.messages.length ? state.messages[state.messages.length - 1].content : '');
+        if (!plan.trim()) { setStatus('Gere um plano antes de inserir.', 'error'); return; }
+        try { insertIntoArena(plan); setStatus('Plano inserido no composer. Revise antes de enviar.', 'ok'); }
+        catch (e) { setStatus(e.message, 'error'); }
+      } }));
+    }
+    chat.appendChild(actions);
+    section.appendChild(chat);
+    section.appendChild(el('div', { id: 'ma-status', class: 'ma-status', text: state.models.length ? state.models.length + ' modelos disponíveis.' : 'Insira sua chave OpenRouter e conecte.' }));
+    section.appendChild(el('div', { class: 'ma-note', text: 'A chave fica apenas na memória desta página. Não feche ou recarregue a Arena AI enquanto estiver usando a sessão. Nunca compartilhe sua chave.' }));
+    panel.appendChild(section);
+    renderMessages();
+    renderControls();
+  }
+
+  function renderControls() {
+    var send = shadow.getElementById('ma-send');
+    if (send) send.disabled = state.busy;
+  }
+  function render() {
+    buildPanel();
+    if (state.models.length) setStatus(state.models.length + ' modelos carregados.', 'ok');
+  }
+  function onArenaResponse(preview) {
+    state.lastArenaPreview = safeText(preview).slice(0, 1000);
+    if (state.agent === 'build' && state.lastArenaPreview) {
+      addMessage('system', 'Preview da resposta da Arena AI (limite atual de 1.000 caracteres):\\n' + state.lastArenaPreview);
+    }
+  }
+
+  launch.addEventListener('click', function () { panel.classList.toggle('open'); });
+  if (window.ArenaAI && typeof window.ArenaAI.onResponseComplete === 'function') {
+    window.ArenaAI.onResponseComplete(onArenaResponse);
+  }
+  window.addEventListener('beforeunload', function () {
+    if (state.aborter) state.aborter.abort();
+    state.apiKey = '';
+    try { delete window.__modelAgentLoaded; } catch (_) {}
+  });
+
+  buildPanel();
+  if (window.ArenaAI && typeof window.ArenaAI.registerPlugin === 'function') {
+    window.ArenaAI.registerPlugin({
+      id: ID,
+      onReady: function () { console.info('[ModelAgent] plugin ready', window.ArenaAI.version); },
+      onUnload: function () {
+        if (state.aborter) state.aborter.abort();
+        state.apiKey = '';
+        host.remove();
+        try { delete window.__modelAgentLoaded; } catch (_) {}
+      }
+    });
+  }
+})();
