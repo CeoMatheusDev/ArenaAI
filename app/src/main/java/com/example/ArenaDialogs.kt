@@ -749,7 +749,6 @@ fun ExtensionSettingsDialog(
     addons: List<ArenaAddon>,
     autoLoadEnabled: Boolean,
     isScanning: Boolean,
-    storageSummary: String,
     onToggleAutoLoad: (Boolean) -> Unit,
     onToggleAddon: (ArenaAddon, Boolean) -> Unit,
     onDeleteAddon: (ArenaAddon) -> Unit,
