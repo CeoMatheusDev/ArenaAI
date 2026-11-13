@@ -676,7 +676,7 @@ ArenaAI/
 ## 2. Automatic Add-on Discovery
 
 Whenever **Arena AI** launches (when notifications and startup scan are enabled):
-1. Silently displays **"Scanning for add-ons…"** while reading `ArenaAI/extension/` and `ArenaAI/plugin/` in the background (legacy `extencao/` and `plugin/` folders are also supported).
+1. Silently displays **"Scanning for add-ons…"** while reading `ArenaAI/extension/` and `ArenaAI/plugin/` in the background (legacy `extensions/`, `extencao/`, `extensão/` and `plugins/` folders are also supported).
 2. Validates the manifest/header and compatibility with the app version (`2.0.0`) and `arena.ai/agent`.
 3. If compatible add-ons are found, posts a notification letting you know compatible add-ons are ready.
 4. If the folders are empty, the scanning notification closes automatically.
@@ -710,7 +710,7 @@ Whenever **Arena AI** launches (when notifications and startup scan are enabled)
 | `id` | `string` | Yes | Unique identifier for the add-on. |
 | `name` | `string` | Yes | Display name shown in the app and `settings.json`. |
 | `version` | `string` | Yes | Semantic version (e.g. `1.0.0`). |
-| `type` | `string` | Yes | `"extension"` (`extensions/` folder) or `"plugin"` (`plugins/` folder). |
+| `type` | `string` | Yes | `"extension"` (`extension/` folder) or `"plugin"` (`plugin/` folder). |
 | `description` | `string` | No | Description displayed in the Extension Settings screen. |
 | `author` | `string` | No | Author name. |
 | `minAppVersion` | `string` | No | Minimum Arena AI app version (current: `2.0.0`). |
