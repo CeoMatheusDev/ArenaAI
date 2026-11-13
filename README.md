@@ -99,7 +99,7 @@ ArenaAI/
 └── plugin/
 ```
 
-Também são reconhecidos os nomes alternativos `extensão` e `plugins` em seus respectivos fluxos de leitura. Para criar um complemento, comece por [docs/ADDONS.md](docs/ADDONS.md).
+Também são reconhecidos os nomes legados `extensions/`, `extencao/`, `extensão/` e `plugins/`. Para criar um complemento, comece por [docs/ADDONS.md](docs/ADDONS.md).
 
 **Instale somente complementos cujo código você examinou e em cuja origem confia.** Scripts de complementos são executados no contexto do WebView e podem interagir com as pontes JavaScript nativas descritas na documentação de segurança.
 
