@@ -1,0 +1,13 @@
+{
+  "id": "modelagent",
+  "name": "ModelAgent",
+  "version": "0.1.0",
+  "type": "plugin",
+  "description": "Orquestrador multiagente com OpenRouter e integração assistida com Arena AI.",
+  "author": "Matheus / OpenAI",
+  "minAppVersion": "2.0.0",
+  "compatible": true,
+  "matchUrls": ["https://arena.ai/*"],
+  "entryPoint": "index.js",
+  "styles": "style.css"
+}
