@@ -54,7 +54,7 @@ O repositório de configurações usa `settings.json`. A implementação tenta m
 - `Documents/ArenaAI/`, utilizando MediaStore nas versões compatíveis;
 - diretório escolhido e autorizado pelo usuário por meio do Storage Access Framework.
 
-A leitura também mantém compatibilidade com o caminho legado `ArenaIA/Settings.json`. O diretório padrão de complementos é `ArenaAI/extencao/` e `ArenaAI/plugin/`; detalhes e formatos estão em [ADDONS.md](ADDONS.md).
+A leitura também mantém compatibilidade com o caminho legado `ArenaIA/Settings.json`. O diretório padrão de complementos é `ArenaAI/extension/` e `ArenaAI/plugin/`; detalhes e formatos estão em [ADDONS.md](ADDONS.md).
 
 ## Integração com o site
 
