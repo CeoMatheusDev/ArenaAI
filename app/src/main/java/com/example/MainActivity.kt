@@ -1086,7 +1086,6 @@ fun ArenaAppScreen(
         if (showAppSettingsDialog) {
             AppSettingsDialog(
                 settings = currentSettings,
-                storageSummary = ArenaSettingsRepository.getDisplayStorageSummary(baseContext, currentSettings),
                 onUpdateSettings = { updated ->
                     persistSettings(updated)
                     if (updated.backgroundServiceEnabled && updated.notifyOnFinish) {
