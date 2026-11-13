@@ -94,8 +94,8 @@ O aplicativo procura complementos na pasta `ArenaAI` do armazenamento do app, em
 ```text
 ArenaAI/
 ├── settings.json
-├── documento.md
-├── extencao/
+├── document.md
+├── extension/
 └── plugin/
 ```
 
