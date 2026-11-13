@@ -24,7 +24,7 @@ ArenaAI/
 
 Os nomes de diretório reconhecidos incluem:
 
-- extensões: ``extensions/`, `extencao/` e `extensão/`;
+- extensões: `extensions/`, `extencao/` e `extensão/`;
 - plugins: `plugin/` e `plugins/`.
 
 O carregador procura arquivos `.js`, `.mjs` e `.json`. Um diretório de complemento pode conter `manifest.json` e arquivos de entrada/estilo referenciados por ele.
