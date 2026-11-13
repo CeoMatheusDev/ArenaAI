@@ -88,7 +88,7 @@ object ArenaAddonManager {
         found: MutableMap<String, ArenaAddon>
     ) {
         scanLocalDirectory(File(arenaRoot, ArenaSettingsRepository.EXTENSIONS_SUBFOLDER), AddonType.EXTENSION, settings, found)
-                scanLocalDirectory(File(arenaRoot, ArenaSettingsRepository.LEGACY_EXTENSIONS_SUBFOLDER), AddonType.EXTENSION, settings, found)
+        scanLocalDirectory(File(arenaRoot, ArenaSettingsRepository.LEGACY_EXTENSIONS_SUBFOLDER), AddonType.EXTENSION, settings, found)
         scanLocalDirectory(File(arenaRoot, ArenaSettingsRepository.LEGACY_EXTENSIONS_ALT_SUBFOLDER), AddonType.EXTENSION, settings, found)
         scanLocalDirectory(File(arenaRoot, ArenaSettingsRepository.LEGACY_EXTENSIONS_ACCENT_SUBFOLDER), AddonType.EXTENSION, settings, found)
         scanLocalDirectory(File(arenaRoot, ArenaSettingsRepository.PLUGINS_SUBFOLDER), AddonType.PLUGIN, settings, found)
