@@ -14,6 +14,8 @@ import java.io.File
 
 data class ArenaSettings(
     val fullscreen: Boolean = false,
+    val desktopMode: Boolean = false,
+    val textZoom: Int = 100,
     val notifyOnFinish: Boolean = true,
     val backgroundServiceEnabled: Boolean = true,
     val keepScreenAwakeOnOpen: Boolean = true,
@@ -21,6 +23,8 @@ data class ArenaSettings(
     val extensionsAutoLoad: Boolean = true,
     val autoScanAddonsOnStartup: Boolean = true,
     val autoLoginPromptEnabled: Boolean = true,
+    val keepSessionCookies: Boolean = true,
+    val language: String = AppLanguage.AUTO.code,
     val connectedEmail: String = "",
     val safTreeUri: String = "",
     val activeExtensions: List<String> = emptyList(),
@@ -32,11 +36,13 @@ object ArenaSettingsRepository {
     const val ROOT_FOLDER = "ArenaAI"
     const val LEGACY_SETTINGS_FOLDER = "ArenaIA"
     const val SETTINGS_FILE_NAME = "settings.json"
-    const val EXTENSIONS_SUBFOLDER = "extencao"
-    const val EXTENSIONS_ALT_SUBFOLDER = "extensão"
-    const val PLUGINS_SUBFOLDER = "plugin"
-    const val GUIDE_FILE_NAME = "documento.md"
-    private const val FOLDER_PLACEHOLDER_FILE = "LEIA_ME.txt"
+    const val EXTENSIONS_SUBFOLDER = "extensions"
+    const val LEGACY_EXTENSIONS_SUBFOLDER = "extencao"
+    const val LEGACY_EXTENSIONS_ALT_SUBFOLDER = "extensão"
+    const val PLUGINS_SUBFOLDER = "plugins"
+    const val LEGACY_PLUGINS_SUBFOLDER = "plugin"
+    const val GUIDE_FILE_NAME = "documentation.md"
+    private const val FOLDER_PLACEHOLDER_FILE = "README.txt"
 
     fun loadSettings(context: Context): ArenaSettings {
         val safUriStr = readInternalSafUriCache(context)
@@ -59,16 +65,25 @@ object ArenaSettingsRepository {
             val activeExt = parseStringList(obj.optJSONArray("activeExtensions"))
             val activePlug = parseStringList(obj.optJSONArray("activePlugins"))
             val loadedSaf = obj.optString("safTreeUri", safUriStr).ifBlank { safUriStr }
+            val loadedLang = AppLanguage.fromCode(obj.optString("language", AppLanguage.AUTO.code)).code
+            val loadedNotify = obj.optBoolean("notifyOnFinish", true)
+
+            ArenaLocaleHelper.persistLanguageCode(context, loadedLang)
+            ArenaLocaleHelper.persistNotifyPreference(context, loadedNotify)
 
             ArenaSettings(
                 fullscreen = obj.optBoolean("fullscreen", false),
-                notifyOnFinish = obj.optBoolean("notifyOnFinish", true),
+                desktopMode = obj.optBoolean("desktopMode", false),
+                textZoom = obj.optInt("textZoom", 100).coerceIn(75, 150),
+                notifyOnFinish = loadedNotify,
                 backgroundServiceEnabled = obj.optBoolean("backgroundServiceEnabled", true),
                 keepScreenAwakeOnOpen = obj.optBoolean("keepScreenAwakeOnOpen", true),
                 keepScreenAwakeOnGenerating = obj.optBoolean("keepScreenAwakeOnGenerating", true),
                 extensionsAutoLoad = obj.optBoolean("extensionsAutoLoad", true),
                 autoScanAddonsOnStartup = obj.optBoolean("autoScanAddonsOnStartup", true),
                 autoLoginPromptEnabled = obj.optBoolean("autoLoginPromptEnabled", true),
+                keepSessionCookies = obj.optBoolean("keepSessionCookies", true),
+                language = loadedLang,
                 connectedEmail = obj.optString("connectedEmail", ""),
                 safTreeUri = loadedSaf,
                 activeExtensions = activeExt,
@@ -84,6 +99,8 @@ object ArenaSettingsRepository {
         if (settings.safTreeUri.isNotBlank()) {
             saveInternalSafUriCache(context, settings.safTreeUri)
         }
+        ArenaLocaleHelper.persistLanguageCode(context, settings.language)
+        ArenaLocaleHelper.persistNotifyPreference(context, settings.notifyOnFinish)
 
         val json = JSONObject().apply {
             put("appName", "Arena AI")
@@ -91,6 +108,8 @@ object ArenaSettingsRepository {
             put("buildNumber", BuildConfig.VERSION_CODE)
             put("targetUrl", ARENA_HOME_URL)
             put("fullscreen", settings.fullscreen)
+            put("desktopMode", settings.desktopMode)
+            put("textZoom", settings.textZoom.coerceIn(75, 150))
             put("notifyOnFinish", settings.notifyOnFinish)
             put("backgroundServiceEnabled", settings.backgroundServiceEnabled)
             put("keepScreenAwakeOnOpen", settings.keepScreenAwakeOnOpen)
@@ -98,6 +117,8 @@ object ArenaSettingsRepository {
             put("extensionsAutoLoad", settings.extensionsAutoLoad)
             put("autoScanAddonsOnStartup", settings.autoScanAddonsOnStartup)
             put("autoLoginPromptEnabled", settings.autoLoginPromptEnabled)
+            put("keepSessionCookies", settings.keepSessionCookies)
+            put("language", settings.language)
             put("connectedEmail", settings.connectedEmail)
             put("safTreeUri", settings.safTreeUri)
             put("activeExtensions", JSONArray(settings.activeExtensions))
@@ -110,7 +131,7 @@ object ArenaSettingsRepository {
         // 1. Always write to app-external ArenaAI/settings.json
         writeAppExternalFile(context, ROOT_FOLDER, SETTINGS_FILE_NAME, content)
 
-        // 2. Try writing directly to /storage/emulated/0/ArenaAI/settings.json if device allows
+        // 2. Try writing directly to /storage/emulated/0/ArenaAI/settings.json if permitted
         writeToRootExternal(ROOT_FOLDER, SETTINGS_FILE_NAME, content)
 
         // 3. Write to Public Documents/ArenaAI/settings.json via MediaStore / File
@@ -129,60 +150,171 @@ object ArenaSettingsRepository {
     }
 
     fun ensureAddonWorkspaceInitialized(context: Context, settings: ArenaSettings = loadSettings(context)) {
-        // 1. App-external ArenaAI/{extencao, plugin, documento.md, settings.json}
-        val appExternalRoot = context.getExternalFilesDir(null)
-        if (appExternalRoot != null) {
-            val arenaDir = File(appExternalRoot, ROOT_FOLDER)
-            File(arenaDir, EXTENSIONS_SUBFOLDER).mkdirs()
-            File(arenaDir, PLUGINS_SUBFOLDER).mkdirs()
+        var missingSettingsFile = false
+
+        // 1. App-external ArenaAI/{extensions, plugins, documentation.md, settings.json}
+        val appExternalRoot = context.getExternalFilesDir(null) ?: context.filesDir
+        val arenaDir = File(appExternalRoot, ROOT_FOLDER)
+        val extDir = File(arenaDir, EXTENSIONS_SUBFOLDER)
+        val pluginDir = File(arenaDir, PLUGINS_SUBFOLDER)
+        if (!extDir.exists()) extDir.mkdirs()
+        if (!pluginDir.exists()) pluginDir.mkdirs()
+
+        val appGuideFile = File(arenaDir, GUIDE_FILE_NAME)
+        if (!appGuideFile.exists() || appGuideFile.length() == 0L) {
             writeAppExternalFile(context, ROOT_FOLDER, GUIDE_FILE_NAME, ADDONS_GUIDE_MARKDOWN)
         }
+        val appSettingsFile = File(arenaDir, SETTINGS_FILE_NAME)
+        if (!appSettingsFile.exists() || appSettingsFile.length() == 0L) {
+            missingSettingsFile = true
+        }
 
-        // 2. Attempt direct /storage/emulated/0/ArenaAI/ creation (works on Android <= 10 or permissive devices)
+        // 2. Attempt direct /storage/emulated/0/ArenaAI/ creation (Android <= 10 or permissive devices)
         try {
             @Suppress("DEPRECATION")
             val rootStorage = Environment.getExternalStorageDirectory()
             if (rootStorage != null && rootStorage.canWrite()) {
                 val rootArena = File(rootStorage, ROOT_FOLDER)
-                File(rootArena, EXTENSIONS_SUBFOLDER).mkdirs()
-                File(rootArena, PLUGINS_SUBFOLDER).mkdirs()
-                writeToRootExternal(ROOT_FOLDER, GUIDE_FILE_NAME, ADDONS_GUIDE_MARKDOWN)
+                val rootExt = File(rootArena, EXTENSIONS_SUBFOLDER)
+                val rootPlug = File(rootArena, PLUGINS_SUBFOLDER)
+                if (!rootExt.exists()) rootExt.mkdirs()
+                if (!rootPlug.exists()) rootPlug.mkdirs()
+                val rootGuide = File(rootArena, GUIDE_FILE_NAME)
+                if (!rootGuide.exists() || rootGuide.length() == 0L) {
+                    writeToRootExternal(ROOT_FOLDER, GUIDE_FILE_NAME, ADDONS_GUIDE_MARKDOWN)
+                }
+                val rootSettings = File(rootArena, SETTINGS_FILE_NAME)
+                if (!rootSettings.exists() || rootSettings.length() == 0L) {
+                    missingSettingsFile = true
+                }
             }
         } catch (_: Exception) {
         }
 
-        // 3. Public Documents/ArenaAI/ via MediaStore (works on Android 10-16 without permissions)
-        writePublicDocumentText(
-            context = context,
-            subPath = ROOT_FOLDER,
-            fileName = GUIDE_FILE_NAME,
-            mimeType = "application/octet-stream",
-            content = ADDONS_GUIDE_MARKDOWN
-        )
+        // 3. Public Documents/ArenaAI/ via MediaStore (works on Android 10-16 without extra permissions)
+        val publicGuideExists = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            findPublicMediaStoreUri(context, ROOT_FOLDER, GUIDE_FILE_NAME) != null
+        } else {
+            @Suppress("DEPRECATION")
+            val docsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS)
+            File(File(docsDir, ROOT_FOLDER), GUIDE_FILE_NAME).exists()
+        }
+        if (!publicGuideExists) {
+            writePublicDocumentText(
+                context = context,
+                subPath = ROOT_FOLDER,
+                fileName = GUIDE_FILE_NAME,
+                mimeType = "application/octet-stream",
+                content = ADDONS_GUIDE_MARKDOWN
+            )
+        }
         ensurePublicSubfolderExists(context, "$ROOT_FOLDER/$EXTENSIONS_SUBFOLDER")
         ensurePublicSubfolderExists(context, "$ROOT_FOLDER/$PLUGINS_SUBFOLDER")
 
-        // Ensure settings.json also exists in Documents/ArenaAI/settings.json
-        saveSettings(context, settings)
+        val publicSettingsExists = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            findPublicMediaStoreUri(context, ROOT_FOLDER, SETTINGS_FILE_NAME) != null
+        } else {
+            @Suppress("DEPRECATION")
+            val docsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS)
+            File(File(docsDir, ROOT_FOLDER), SETTINGS_FILE_NAME).exists()
+        }
+        if (!publicSettingsExists || missingSettingsFile) {
+            saveSettings(context, settings)
+        }
 
-        // 4. If user authorized SAF tree (e.g. Internal Storage/ArenaAI), create full structure there too
+        // 4. If user authorized a SAF tree (e.g. Internal Storage/ArenaAI), create missing files/folders there too
         if (settings.safTreeUri.isNotBlank()) {
             ensureSafWorkspace(context, settings.safTreeUri)
+            if (readFromSafRoot(context, settings.safTreeUri, SETTINGS_FILE_NAME).isNullOrBlank()) {
+                saveSettings(context, settings)
+            }
         }
     }
 
+    fun resetAllAppData(context: Context): ArenaSettings {
+        val currentSafUri = readInternalSafUriCache(context)
+        if (currentSafUri.isNotBlank()) {
+            try {
+                val flags = android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                    android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                context.contentResolver.releasePersistableUriPermission(Uri.parse(currentSafUri), flags)
+            } catch (_: Exception) {
+            }
+        }
+
+        // Clear all internal SharedPreferences
+        try {
+            val prefs = context.getSharedPreferences("arena_internal_prefs", Context.MODE_PRIVATE)
+            prefs.edit().clear().commit()
+        } catch (_: Exception) {
+        }
+
+        // Delete app-external, internal, and external ArenaAI / legacy ArenaIA directories
+        val folderNames = listOf(ROOT_FOLDER, LEGACY_SETTINGS_FOLDER)
+        val baseCandidates = buildList {
+            context.getExternalFilesDir(null)?.let { add(it) }
+            add(context.filesDir)
+            try {
+                @Suppress("DEPRECATION")
+                Environment.getExternalStorageDirectory()?.takeIf { it.canWrite() }?.let { add(it) }
+            } catch (_: Exception) {
+            }
+            try {
+                @Suppress("DEPRECATION")
+                Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS)?.let { add(it) }
+            } catch (_: Exception) {
+            }
+        }
+
+        for (base in baseCandidates) {
+            for (folder in folderNames) {
+                try {
+                    val target = File(base, folder)
+                    if (target.exists()) {
+                        target.deleteRecursively()
+                    }
+                } catch (_: Exception) {
+                }
+            }
+        }
+
+        // Delete MediaStore entries owned by this app inside Documents/ArenaAI and Documents/ArenaIA
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            try {
+                val collection = MediaStore.Files.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+                val selection = "${MediaStore.MediaColumns.RELATIVE_PATH} LIKE ? OR ${MediaStore.MediaColumns.RELATIVE_PATH} LIKE ?"
+                val selectionArgs = arrayOf("%$ROOT_FOLDER%", "%$LEGACY_SETTINGS_FOLDER%")
+                context.contentResolver.delete(collection, selection, selectionArgs)
+            } catch (_: Exception) {
+            }
+        }
+
+        // Clear app cache files
+        try {
+            context.cacheDir?.listFiles()?.forEach { it.deleteRecursively() }
+        } catch (_: Exception) {
+        }
+
+        // Recreate clean factory-default English ArenaAI directory structure
+        val defaults = ArenaSettings()
+        ensureAddonWorkspaceInitialized(context, defaults)
+        saveSettings(context, defaults)
+        return defaults
+    }
+
     fun getDisplayStorageSummary(context: Context, settings: ArenaSettings): String {
+        val localized = ArenaLocaleHelper.localizedContext(context, settings.language)
         val appPath = File(context.getExternalFilesDir(null), ROOT_FOLDER).absolutePath
         return buildString {
-            append("• Pasta pública (Documentos):\n  Documents/$ROOT_FOLDER/\n")
+            append("${localized.getString(R.string.storage_public_folder)}\n  Documents/$ROOT_FOLDER/\n")
             append("  ├── $SETTINGS_FILE_NAME\n")
             append("  ├── $GUIDE_FILE_NAME\n")
             append("  ├── $EXTENSIONS_SUBFOLDER/\n")
             append("  └── $PLUGINS_SUBFOLDER/\n")
             if (settings.safTreeUri.isNotBlank()) {
-                append("\n• Pasta vinculada (SAF): Ativa\n")
+                append("\n${localized.getString(R.string.storage_saf_active)}\n")
             }
-            append("\n• Espelho local do app:\n  $appPath")
+            append("\n${localized.getString(R.string.storage_local_mirror)}\n  $appPath")
         }
     }
 
@@ -195,7 +327,7 @@ object ArenaSettingsRepository {
                     subPath = subPath,
                     fileName = FOLDER_PLACEHOLDER_FILE,
                     mimeType = "text/plain",
-                    content = "Pasta oficial de complementos do Arena AI.\nColoque seus arquivos .js ou manifest.json nesta pasta.\n"
+                    content = "Official Arena AI add-ons folder.\nPlace your .js or manifest.json files in this directory.\n"
                 )
             }
         }
@@ -214,7 +346,9 @@ object ArenaSettingsRepository {
             val targetParentId = ensureSafSubdir(context, treeUri, rootDocId, ROOT_FOLDER) ?: rootDocId
             ensureSafSubdir(context, treeUri, targetParentId, EXTENSIONS_SUBFOLDER)
             ensureSafSubdir(context, treeUri, targetParentId, PLUGINS_SUBFOLDER)
-            writeSafDocument(context, treeUri, targetParentId, GUIDE_FILE_NAME, "application/octet-stream", ADDONS_GUIDE_MARKDOWN)
+            if (findSafChildDocId(context, treeUri, targetParentId, GUIDE_FILE_NAME) == null) {
+                writeSafDocument(context, treeUri, targetParentId, GUIDE_FILE_NAME, "application/octet-stream", ADDONS_GUIDE_MARKDOWN)
+            }
         } catch (_: Exception) {
         }
     }
@@ -531,51 +665,51 @@ object ArenaSettingsRepository {
     }
 
     val ADDONS_GUIDE_MARKDOWN = """
-# Documentação Oficial de Extensões e Plugins — Arena AI
+# Official Extensions and Plugins Documentation — Arena AI
 
-Bem-vindo ao guia de desenvolvimento de **Extensões e Plugins para o Arena AI** (`https://arena.ai/agent`).
-Este documento (`ArenaAI/documento.md`) contém a introdução, estrutura de diretórios, parâmetros obrigatórios e a API de conexão entre o site, o complemento e o aplicativo Android.
+Welcome to the developer guide for **Arena AI Extensions & Plugins** (`https://arena.ai/agent`).
+This document (`ArenaAI/documentation.md`) provides an introduction, directory layout, required parameters, and the bridge API connecting the web app, your add-on, and the Android client.
 
 ---
 
-## 1. Estrutura de Diretórios (`ArenaAI/`)
+## 1. Directory Structure (`ArenaAI/`)
 
-O aplicativo cria e monitora automaticamente os seguintes arquivos e pastas no armazenamento do aparelho (`Documents/ArenaAI/` e pasta vinculada):
+The application automatically creates and monitors the following files and folders on device storage (`Documents/ArenaAI/` and any linked SAF directory):
 
 ```text
 ArenaAI/
-├── settings.json     # Todas as configurações do app, tela cheia, tela ligada, notificações, 2º plano e extensões/plugins ativos
-├── documento.md      # Este manual com parâmetros e instruções
-├── extencao/         # Coloque aqui suas Extensões (.js ou pasta com manifest.json)
-└── plugin/           # Coloque aqui seus Plugins (.js ou pasta com manifest.json)
+├── settings.json      # All app settings: fullscreen, keep awake, notifications, language, background mode, and active extensions/plugins
+├── documentation.md   # This manual with parameters and developer instructions
+├── extensions/        # Place your Extensions here (.js file or subfolder with manifest.json)
+└── plugins/           # Place your Plugins here (.js file or subfolder with manifest.json)
 ```
 
-> **Dica:** Para vincular diretamente a pasta `ArenaAI` na raiz do armazenamento interno (se desejar), abra **Menu (⋮) → Configuração de Extensão → Pasta ArenaAI** e selecione/crie a pasta.
+> **Tip:** To link a custom `ArenaAI` folder in internal storage, open **Menu (⋮) → Settings → ArenaAI Folder** (or **Extension → ArenaAI Folder**) and select or create the directory.
 
 ---
 
-## 2. Como o App Faz a Leitura Automática
+## 2. Automatic Add-on Discovery
 
-Sempre que o **Arena AI** é aberto:
-1. Exibe a notificação **"Procurando complementos…"** enquanto lê `ArenaAI/extencao/` e `ArenaAI/plugin/` em segundo plano.
-2. Valida o manifesto/cabeçalho e a compatibilidade com a versão do app (`2.0.0`) e com o site `arena.ai/agent`.
-3. Se houver complementos compatíveis, dispara uma notificação informando que há complementos disponíveis e compatíveis.
-4. Se as pastas estiverem vazias, a notificação de busca é fechada automaticamente.
-5. Os IDs ativos são gravados automaticamente em `ArenaAI/settings.json` nos campos `activeExtensions` e `activePlugins`.
+Whenever **Arena AI** launches (when notifications and startup scan are enabled):
+1. Silently displays **"Scanning for add-ons…"** while reading `ArenaAI/extensions/` and `ArenaAI/plugins/` in the background (legacy `extencao/` and `plugin/` folders are also supported).
+2. Validates the manifest/header and compatibility with the app version (`2.0.0`) and `arena.ai/agent`.
+3. If compatible add-ons are found, posts a notification letting you know compatible add-ons are ready.
+4. If the folders are empty, the scanning notification closes automatically.
+5. Active IDs are saved automatically in `ArenaAI/settings.json` under `activeExtensions` and `activePlugins`.
 
 ---
 
-## 3. Parâmetros e Formatos Aceitos
+## 3. Accepted Formats and Parameters
 
-### Opção A — Manifesto `manifest.json` + Script `.js`
+### Option A — `manifest.json` + `.js` Script
 ```json
 {
-  "id": "meu-tema-neon",
-  "name": "Tema Neon",
+  "id": "my-neon-theme",
+  "name": "Neon Theme",
   "version": "1.0.0",
   "type": "extension",
-  "description": "Personaliza cores e adiciona botões rápidos no Arena AI.",
-  "author": "Seu Nome",
+  "description": "Customizes colors and adds quick action buttons in Arena AI.",
+  "author": "Your Name",
   "minAppVersion": "2.0.0",
   "compatible": true,
   "matchUrls": ["*://arena.ai/*"],
@@ -585,35 +719,35 @@ Sempre que o **Arena AI** é aberto:
 }
 ```
 
-#### Parâmetros do `manifest.json`
-| Parâmetro | Tipo | Obrigatório | Descrição |
+#### `manifest.json` Parameters
+| Parameter | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| `id` | `string` | Sim | Identificador único do complemento. |
-| `name` | `string` | Sim | Nome exibido no aplicativo e em `settings.json`. |
-| `version` | `string` | Sim | Versão semântica (ex: `1.0.0`). |
-| `type` | `string` | Sim | `"extension"` (pasta `extencao/`) ou `"plugin"` (pasta `plugin/`). |
-| `description` | `string` | Não | Descrição exibida na tela de Configuração de Extensão. |
-| `author` | `string` | Não | Nome do autor. |
-| `minAppVersion` | `string` | Não | Versão mínima do app Arena AI (atual: `2.0.0`). |
-| `compatible` | `boolean` | Não | `true` para habilitar carregamento. |
-| `matchUrls` | `string[]` | Não | Padrões de URL compatíveis (padrão: `["*://arena.ai/*"]`). |
-| `permissions` | `string[]` | Não | `"ui"`, `"storage"`, `"notifications"`, `"account"`. |
-| `entryPoint` | `string` | Não | Arquivo `.js` principal (ou use `"script"` inline). |
-| `styles` | `string` | Não | Arquivo `.css` opcional (ou use `"css"` inline). |
+| `id` | `string` | Yes | Unique identifier for the add-on. |
+| `name` | `string` | Yes | Display name shown in the app and `settings.json`. |
+| `version` | `string` | Yes | Semantic version (e.g. `1.0.0`). |
+| `type` | `string` | Yes | `"extension"` (`extensions/` folder) or `"plugin"` (`plugins/` folder). |
+| `description` | `string` | No | Description displayed in the Extension Settings screen. |
+| `author` | `string` | No | Author name. |
+| `minAppVersion` | `string` | No | Minimum Arena AI app version (current: `2.0.0`). |
+| `compatible` | `boolean` | No | Set to `true` to enable loading. |
+| `matchUrls` | `string[]` | No | Compatible URL patterns (default: `["*://arena.ai/*"]`). |
+| `permissions` | `string[]` | No | `"ui"`, `"storage"`, `"notifications"`, `"account"`. |
+| `entryPoint` | `string` | No | Main `.js` file (or provide inline `"script"`). |
+| `styles` | `string` | No | Optional `.css` file (or provide inline `"css"`). |
 
 ---
 
-### Opção B — Arquivo Único `.js` (Com Cabeçalho)
-Salve um arquivo `.js` diretamente em `ArenaAI/extencao/` ou `ArenaAI/plugin/`:
+### Option B — Single `.js` File (With Metadata Header)
+Save a `.js` file directly inside `ArenaAI/extensions/` or `ArenaAI/plugins/`:
 
 ```javascript
 // ==ArenaAI==
-// @id            atalho-prompt
-// @name          Atalho de Prompt
+// @id            prompt-shortcut
+// @name          Prompt Shortcut
 // @version       1.0.0
 // @type          plugin
-// @description   Insere um botão flutuante para prompts rápidos no Arena AI.
-// @author        Comunidade Arena AI
+// @description   Adds a floating button for quick prompts in Arena AI.
+// @author        Arena AI Community
 // @minAppVersion 2.0.0
 // @match         *://arena.ai/*
 // @compatible    true
@@ -621,16 +755,16 @@ Salve um arquivo `.js` diretamente em `ArenaAI/extencao/` ou `ArenaAI/plugin/`:
 
 (function(ArenaAI) {
     ArenaAI.registerPlugin({
-        id: 'atalho-prompt',
+        id: 'prompt-shortcut',
         onReady: function() {
             ArenaAI.ui.injectCSS('.arena-btn { position: fixed; bottom: 88px; right: 16px; z-index: 9999; padding: 10px 14px; border-radius: 999px; background: #38BDF8; color: #031E2F; font-weight: bold; border: none; }');
             var btn = document.createElement('button');
             btn.className = 'arena-btn';
-            btn.innerText = 'Prompt Rápido';
+            btn.innerText = 'Quick Prompt';
             btn.onclick = function() {
                 var ta = document.querySelector('textarea');
                 if (ta) {
-                    ta.value = 'Explique passo a passo de forma clara: ';
+                    ta.value = 'Explain step by step clearly: ';
                     ta.dispatchEvent(new Event('input', { bubbles: true }));
                     ta.focus();
                 }
@@ -643,59 +777,64 @@ Salve um arquivo `.js` diretamente em `ArenaAI/extencao/` ou `ArenaAI/plugin/`:
 
 ---
 
-## 4. API Global `window.ArenaAI` (App ↔ Site)
+## 4. Global API `window.ArenaAI` (App <-> Web)
 
-- `window.ArenaAI.version` → Versão do app (`"2.0.0"`).
-- `window.ArenaAI.platform` → `"android-webview"`.
-- `window.ArenaAI.connectedEmail` → E-mail da conta do aparelho conectada no app.
-- `window.ArenaAI.requestLogin()` → Abre a lista de e-mails do celular.
-- `window.ArenaAI.notify(titulo, mensagem)` → Envia uma notificação nativa no telefone.
-- `window.ArenaAI.ui.injectCSS(css)` → Injeta CSS personalizado no site.
-- `window.ArenaAI.storage.get(chave)` / `set(chave, valor)` → Armazena dados locais do complemento.
-- `window.ArenaAI.onResponseComplete(fn)` → Dispara quando o modelo termina de responder e o DOM do chat estabiliza por 1 segundo.
-- `window.ArenaAI.onPromptSubmit(fn)` → Dispara quando um prompt é enviado.
-- `window.ArenaAI.dom.click(el)` → Dispara sequência completa (`PointerEvent`, `TouchEvent`, `MouseEvent` e `.click()`) compatível com React/Tailwind/Radix no WebView.
-- `window.ArenaAI.dom.waitFor(selector, timeout)` → Retorna uma `Promise` aguardando o elemento aparecer no DOM (padrão: `10000ms`).
-- `window.ArenaAI.dom.cleanText(el)` → Extrai texto limpo ignorando `<svg>`, `<style>` e `<script>`.
-- `window.ArenaAI.registerExtension(cfg)` / `registerPlugin(cfg)` → Registra o complemento na sessão.
-- `window.ArenaAI.fs` → Referência direta à ponte nativa `window.ArenaFS`.
-- **Depuração WebView**: `WebView.setWebContentsDebuggingEnabled(true)` está ativo; conecte via USB e acesse `chrome://inspect` no PC.
+- `window.ArenaAI.version` -> App version (`"2.0.0"`).
+- `window.ArenaAI.platform` -> `"android-webview"`.
+- `window.ArenaAI.language` -> Active resolved app language code (e.g. `"en"`, `"pt-BR"`, `"es"`).
+- `window.ArenaAI.connectedEmail` -> Device email account connected to the app.
+- `window.ArenaAI.requestLogin()` -> Opens the native device email picker.
+- `window.ArenaAI.notify(title, message)` -> Sends a native phone notification (if notifications are enabled).
+- `window.ArenaAI.ui.injectCSS(css)` -> Injects custom CSS into the page.
+- `window.ArenaAI.storage.get(key)` / `set(key, value)` -> Persists local add-on data.
+- `window.ArenaAI.onResponseComplete(fn)` -> Fires only after generation finishes (`Stop generating` -> `Send message`) and the DOM settles.
+- `window.ArenaAI.onPromptSubmit(fn)` -> Fires when a prompt is submitted.
+- `window.ArenaAI.dom.click(el)` -> Dispatches full event sequence (`PointerEvent`, `TouchEvent`, `MouseEvent`, `.focus()`, `.click()`) compatible with React/Tailwind/Radix inside WebView.
+- `window.ArenaAI.dom.waitFor(selector, timeout)` -> Returns a `Promise` resolving when the element appears in the DOM (default: `10000ms`).
+- `window.ArenaAI.dom.cleanText(el)` -> Extracts clean text ignoring `<svg>`, `<style>`, and `<script>`.
+- `window.ArenaAI.registerExtension(cfg)` / `registerPlugin(cfg)` -> Registers the add-on for the session.
+- `window.ArenaAI.fs` -> Direct reference to the native `window.ArenaFS` bridge.
+- **WebView Debugging**: `WebView.setWebContentsDebuggingEnabled(true)` is enabled; connect via USB and open `chrome://inspect` on desktop.
 
 ---
 
-## 5. Ponte Nativa de Arquivos (`window.ArenaFS`)
+## 5. Native File Bridge (`window.ArenaFS`)
 
-O aplicativo expõe nativamente no WebView o objeto `window.ArenaFS` (`addJavascriptInterface(..., "ArenaFS")`) para que o site e extensões/plugins leiam e gravem arquivos com segurança dentro do sandbox `ArenaAI/` e em pastas autorizadas via SAF:
+The app exposes `window.ArenaFS` (`addJavascriptInterface(..., "ArenaFS")`) in WebView so scripts can safely read and write files inside the `ArenaAI/` sandbox and SAF-authorized folders:
 
-- `ArenaFS.getArenaDir()` → Retorna o caminho raiz da pasta `ArenaAI`.
-- `ArenaFS.listFiles(path)` → Retorna JSON `{ ok, path, entries: [{ name, path, isDirectory, size, lastModified }] }`. Use `"."`, `"extencao"`, `"plugin"` ou URI `content://`.
-- `ArenaFS.readFile(path)` → Lê e retorna o conteúdo UTF-8 do arquivo (ou `null` se não existir).
-- `ArenaFS.writeFile(path, content)` → Grava `content` no arquivo (retorna `true`/`false`).
-- `ArenaFS.exists(path)` / `ArenaFS.mkdir(path)` / `ArenaFS.deleteFile(path)` → Verificação, criação de subpastas e remoção segura.
-- `ArenaFS.pickDirectory()` → Abre o seletor de pastas do Android (SAF) e retorna a URI autorizada (`content://...`).
+- `ArenaFS.getArenaDir()` -> Returns the root `ArenaAI` directory path.
+- `ArenaFS.listFiles(path)` -> Returns JSON `{ ok, path, entries: [{ name, path, isDirectory, size, lastModified }] }`. Use `"."`, `"extensions"`, `"plugins"`, or a `content://` URI.
+- `ArenaFS.readFile(path)` -> Reads and returns UTF-8 file contents (or `null` if missing).
+- `ArenaFS.writeFile(path, content)` -> Writes `content` to the file (`true`/`false`).
+- `ArenaFS.exists(path)` / `ArenaFS.mkdir(path)` / `ArenaFS.deleteFile(path)` -> Check existence, create directories, and safely delete files.
+- `ArenaFS.pickDirectory()` -> Opens the Android folder picker (SAF) and returns the authorized URI (`content://...`).
 
 ```javascript
-// Exemplo usando ArenaFS em uma extensão/plugin
-const lista = JSON.parse(window.ArenaFS.listFiles("extencao"));
-window.ArenaFS.writeFile("plugin/notas.txt", "Salvo pelo plugin!");
-const conteudo = window.ArenaFS.readFile("settings.json");
+// Example using ArenaFS inside an extension or plugin
+const list = JSON.parse(window.ArenaFS.listFiles("extensions"));
+window.ArenaFS.writeFile("plugins/notes.txt", "Saved by plugin!");
+const config = window.ArenaFS.readFile("settings.json");
 ```
 
 ---
 
-## 6. Estrutura do `ArenaAI/settings.json`
+## 6. `ArenaAI/settings.json` Schema
 
-Todas as configurações ajustadas no aplicativo são salvas automaticamente em `ArenaAI/settings.json`:
-- `fullscreen`: Tela cheia ativada/desativada
-- `notifyOnFinish`: Notificação ao finalizar resposta
-- `backgroundServiceEnabled`: Funcionamento contínuo em segundo plano
-- `keepScreenAwakeOnOpen`: Manter tela ligada quando o app está aberto
-- `keepScreenAwakeOnGenerating`: Manter tela ligada enquanto o modelo gera saída
-- `extensionsAutoLoad`: Executar extensões/plugins automaticamente
-- `autoScanAddonsOnStartup`: Ler pasta `ArenaAI` ao abrir o app
-- `autoLoginPromptEnabled`: Abrir lista de e-mails do celular em chamadas de login
-- `connectedEmail`: E-mail conectado no app e site
-- `activeExtensions` / `activePlugins`: Lista de extensões e plugins ativos
-- `disabledAddonIds`: IDs desativados pelo usuário
+All preferences configured in the app are automatically saved to `ArenaAI/settings.json`:
+- `fullscreen`: Fullscreen mode enabled/disabled
+- `desktopMode`: Desktop User-Agent mode for `arena.ai/agent`
+- `textZoom`: WebView page text scale percentage (`75` to `150`, default `100`)
+- `notifyOnFinish`: Enable or completely disable all app notifications
+- `backgroundServiceEnabled`: Continuous background execution
+- `keepScreenAwakeOnOpen`: Keep screen on while app is open
+- `keepScreenAwakeOnGenerating`: Keep screen on while the model is generating
+- `extensionsAutoLoad`: Automatically inject active extensions/plugins
+- `autoScanAddonsOnStartup`: Scan `ArenaAI` add-on folders on startup
+- `autoLoginPromptEnabled`: Show device email picker on login prompts
+- `keepSessionCookies`: Persist session cookies across restarts
+- `language`: Language code (`"auto"`, `"en"`, `"zh-CN"`, `"hi"`, `"es"`, `"fr"`, `"ar"`, `"bn"`, `"pt-BR"`, `"pt-PT"`, `"ru"`, `"ur"`)
+- `connectedEmail`: Device email connected to the app and site
+- `activeExtensions` / `activePlugins`: Lists of active extension and plugin IDs
+- `disabledAddonIds`: IDs disabled by the user
 """.trimIndent()
 }

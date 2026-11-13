@@ -25,17 +25,22 @@ object NotificationHelper {
     const val EXTRA_OPEN_EXTENSIONS = "OPEN_EXTENSIONS_CONFIG"
     const val EXTRA_OPEN_FROM_NOTIFICATION = "OPEN_FROM_NOTIFICATION"
 
+    fun isNotificationsAllowed(context: Context): Boolean {
+        return ArenaLocaleHelper.isNotifyPreferenceEnabled(context)
+    }
+
     fun createNotificationChannels(context: Context) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val localized = ArenaLocaleHelper.localizedContext(context)
             val notificationManager =
                 context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager ?: return
 
             val responseChannel = NotificationChannel(
                 CHANNEL_ID_RESPONSES,
-                context.getString(R.string.notification_channel_name),
+                localized.getString(R.string.notification_channel_name),
                 NotificationManager.IMPORTANCE_HIGH
             ).apply {
-                description = context.getString(R.string.notification_channel_desc)
+                description = localized.getString(R.string.notification_channel_desc)
                 enableVibration(true)
                 vibrationPattern = longArrayOf(0, 300, 150, 300)
                 enableLights(true)
@@ -45,29 +50,29 @@ object NotificationHelper {
 
             val serviceChannel = NotificationChannel(
                 CHANNEL_ID_SERVICE,
-                context.getString(R.string.service_channel_name),
+                localized.getString(R.string.service_channel_name),
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
-                description = context.getString(R.string.service_channel_desc)
+                description = localized.getString(R.string.service_channel_desc)
                 setShowBadge(false)
             }
 
             val scanChannel = NotificationChannel(
                 CHANNEL_ID_SCAN,
-                context.getString(R.string.scan_addons_title),
+                localized.getString(R.string.scan_addons_title),
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
-                description = context.getString(R.string.addons_channel_desc)
+                description = localized.getString(R.string.addons_channel_desc)
                 setShowBadge(false)
                 setSound(null, null)
             }
 
             val addonsFoundChannel = NotificationChannel(
                 CHANNEL_ID_ADDONS_FOUND,
-                context.getString(R.string.addons_channel_name),
+                localized.getString(R.string.addons_channel_name),
                 NotificationManager.IMPORTANCE_HIGH
             ).apply {
-                description = context.getString(R.string.addons_channel_desc)
+                description = localized.getString(R.string.addons_channel_desc)
                 enableVibration(true)
                 setShowBadge(true)
             }
@@ -80,6 +85,7 @@ object NotificationHelper {
     }
 
     fun buildServiceNotification(context: Context): Notification {
+        val localized = ArenaLocaleHelper.localizedContext(context)
         val launchIntent = Intent(context, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
         }
@@ -92,8 +98,8 @@ object NotificationHelper {
 
         return NotificationCompat.Builder(context, CHANNEL_ID_SERVICE)
             .setSmallIcon(R.drawable.ic_launcher_foreground)
-            .setContentTitle(context.getString(R.string.service_notification_title))
-            .setContentText(context.getString(R.string.service_notification_text))
+            .setContentTitle(localized.getString(R.string.service_notification_title))
+            .setContentText(localized.getString(R.string.service_notification_text))
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setOngoing(true)
             .setContentIntent(pendingIntent)
@@ -101,6 +107,12 @@ object NotificationHelper {
     }
 
     fun showResponseNotification(context: Context, previewText: String?) {
+        if (!isNotificationsAllowed(context)) {
+            cancelAllNotifications(context)
+            return
+        }
+
+        val localized = ArenaLocaleHelper.localizedContext(context)
         val launchIntent = Intent(context, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
             putExtra(EXTRA_OPEN_FROM_NOTIFICATION, true)
@@ -118,18 +130,19 @@ object NotificationHelper {
             val clean = previewText.trim()
             if (clean.length > 180) clean.take(180) + "…" else clean
         } else {
-            context.getString(R.string.response_completed_default_body)
+            localized.getString(R.string.response_completed_default_body)
         }
 
+        val titleText = localized.getString(R.string.response_completed_title)
         val notification = NotificationCompat.Builder(context, CHANNEL_ID_RESPONSES)
             .setSmallIcon(R.drawable.ic_launcher_foreground)
-            .setContentTitle(context.getString(R.string.response_completed_title))
+            .setContentTitle(titleText)
             .setContentText(bodyText)
             .setStyle(
                 NotificationCompat.BigTextStyle()
                     .bigText(bodyText)
-                    .setBigContentTitle(context.getString(R.string.response_completed_title))
-                    .setSummaryText(context.getString(R.string.app_name))
+                    .setBigContentTitle(titleText)
+                    .setSummaryText(localized.getString(R.string.app_name))
             )
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setDefaults(NotificationCompat.DEFAULT_ALL)
@@ -147,10 +160,16 @@ object NotificationHelper {
     }
 
     fun showScanningAddonsNotification(context: Context) {
+        if (!isNotificationsAllowed(context)) {
+            cancelScanningNotification(context)
+            return
+        }
+
+        val localized = ArenaLocaleHelper.localizedContext(context)
         val notification = NotificationCompat.Builder(context, CHANNEL_ID_SCAN)
             .setSmallIcon(R.drawable.ic_launcher_foreground)
-            .setContentTitle(context.getString(R.string.scan_addons_title))
-            .setContentText(context.getString(R.string.scan_addons_progress))
+            .setContentTitle(localized.getString(R.string.scan_addons_title))
+            .setContentText(localized.getString(R.string.scan_addons_progress))
             .setProgress(0, 0, true)
             .setOngoing(true)
             .setSilent(true)
@@ -172,7 +191,11 @@ object NotificationHelper {
 
     fun showAddonsFoundNotification(context: Context, extensionsCount: Int, pluginsCount: Int) {
         cancelScanningNotification(context)
+        if (!isNotificationsAllowed(context)) {
+            return
+        }
 
+        val localized = ArenaLocaleHelper.localizedContext(context)
         val launchIntent = Intent(context, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
             putExtra(EXTRA_OPEN_EXTENSIONS, true)
@@ -184,18 +207,14 @@ object NotificationHelper {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        val summary = buildString {
-            append("Disponível e compatível: ")
-            val parts = mutableListOf<String>()
-            if (extensionsCount > 0) parts.add("$extensionsCount extensão(ões)")
-            if (pluginsCount > 0) parts.add("$pluginsCount plugin(s)")
-            append(parts.joinToString(" e "))
-            append(" em ArenaAI. Toque para configurar.")
-        }
+        val parts = mutableListOf<String>()
+        if (extensionsCount > 0) parts.add(localized.getString(R.string.addons_count_extensions, extensionsCount))
+        if (pluginsCount > 0) parts.add(localized.getString(R.string.addons_count_plugins, pluginsCount))
+        val summary = localized.getString(R.string.scan_addons_found_summary, parts.joinToString(", "))
 
         val notification = NotificationCompat.Builder(context, CHANNEL_ID_ADDONS_FOUND)
             .setSmallIcon(R.drawable.ic_launcher_foreground)
-            .setContentTitle(context.getString(R.string.scan_addons_found_title))
+            .setContentTitle(localized.getString(R.string.scan_addons_found_title))
             .setContentText(summary)
             .setStyle(NotificationCompat.BigTextStyle().bigText(summary))
             .setPriority(NotificationCompat.PRIORITY_HIGH)
@@ -209,7 +228,20 @@ object NotificationHelper {
         }
     }
 
+    fun cancelAllNotifications(context: Context) {
+        try {
+            NotificationManagerCompat.from(context).cancelAll()
+        } catch (_: Exception) {
+        }
+        stopBackgroundService(context)
+    }
+
     fun startBackgroundService(context: Context) {
+        // When notifications are turned off in Settings, do not display any foreground notification
+        if (!isNotificationsAllowed(context)) {
+            stopBackgroundService(context)
+            return
+        }
         val serviceIntent = Intent(context, ArenaBackgroundService::class.java)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             context.startForegroundService(serviceIntent)
@@ -219,7 +251,10 @@ object NotificationHelper {
     }
 
     fun stopBackgroundService(context: Context) {
-        val serviceIntent = Intent(context, ArenaBackgroundService::class.java)
-        context.stopService(serviceIntent)
+        try {
+            val serviceIntent = Intent(context, ArenaBackgroundService::class.java)
+            context.stopService(serviceIntent)
+        } catch (_: Exception) {
+        }
     }
 }

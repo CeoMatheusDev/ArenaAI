@@ -5,6 +5,7 @@ import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 
@@ -18,8 +19,10 @@ class ArenaWebViewState {
     var hasError by mutableStateOf(false)
     var errorMessage by mutableStateOf<String?>(null)
     var isFullscreen by mutableStateOf(false)
+    var desktopMode by mutableStateOf(false)
+    var textZoom by mutableIntStateOf(100)
 
-    // Generation, Notifications, Screen Wake, and Background status
+    // Generation, notifications, language, screen wake, privacy, and background status
     var isGenerating by mutableStateOf(false)
     var notifyOnFinish by mutableStateOf(true)
     var backgroundServiceEnabled by mutableStateOf(true)
@@ -28,10 +31,12 @@ class ArenaWebViewState {
     var extensionsAutoLoad by mutableStateOf(true)
     var autoScanAddonsOnStartup by mutableStateOf(true)
     var autoLoginPromptEnabled by mutableStateOf(true)
+    var keepSessionCookies by mutableStateOf(true)
+    var language by mutableStateOf(AppLanguage.AUTO.code)
     var isInBackground by mutableStateOf(false)
     var lastResponseSnippet by mutableStateOf<String?>(null)
 
-    // Account & Addons state
+    // Account and add-ons state
     var connectedEmail by mutableStateOf("")
     var pendingAuthUrl by mutableStateOf<String?>(null)
     var hasPromptedAccountForCurrentAuth by mutableStateOf(false)

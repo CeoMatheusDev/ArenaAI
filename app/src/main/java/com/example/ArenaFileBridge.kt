@@ -42,10 +42,10 @@ class ArenaFileBridge(
             }
 
             val dir = resolveSandboxedFile(raw.ifBlank { "." }, mustExist = true)
-                ?: return errorJson("Caminho inválido ou fora do diretório permitido.")
+                ?: return errorJson("Invalid path or outside allowed sandbox directory.")
 
             if (!dir.exists() || !dir.isDirectory) {
-                return errorJson("Diretório não encontrado: ${dir.name}")
+                return errorJson("Directory not found: ${dir.name}")
             }
 
             val entries = JSONArray()
@@ -67,7 +67,7 @@ class ArenaFileBridge(
             result.put("entries", entries)
             result.toString()
         } catch (e: Exception) {
-            errorJson(e.message ?: "Erro ao listar arquivos.")
+            errorJson(e.message ?: "Failed to list files.")
         }
     }
 
@@ -300,7 +300,7 @@ class ArenaFileBridge(
         return try {
             val treeUri = Uri.parse(uriString)
             if (!isSafUriAuthorized(treeUri)) {
-                return errorJson("URI SAF não autorizada.")
+                return errorJson("Unauthorized SAF URI.")
             }
             val docId = if (DocumentsContract.isDocumentUri(context, treeUri)) {
                 DocumentsContract.getDocumentId(treeUri)
@@ -344,7 +344,7 @@ class ArenaFileBridge(
                 put("entries", entries)
             }.toString()
         } catch (e: Exception) {
-            errorJson(e.message ?: "Erro ao listar diretório SAF.")
+            errorJson(e.message ?: "Failed to list SAF directory.")
         }
     }
 

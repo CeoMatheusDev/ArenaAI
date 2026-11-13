@@ -2,6 +2,7 @@ package com.example
 
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -20,18 +21,28 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.BrightnessHigh
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.Extension
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.RadioButtonChecked
+import androidx.compose.material.icons.filled.RadioButtonUnchecked
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Remove
+import androidx.compose.material.icons.filled.RestartAlt
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilledTonalButton
@@ -44,6 +55,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -53,6 +65,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
@@ -91,7 +104,7 @@ fun AboutArenaDialog(
                         fontWeight = FontWeight.Bold
                     )
                     Text(
-                        text = "https://arena.ai/agent",
+                        text = ARENA_HOME_URL,
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.primary
                     )
@@ -104,25 +117,25 @@ fun AboutArenaDialog(
                 modifier = Modifier.verticalScroll(rememberScrollState())
             ) {
                 Text(
-                    text = "Cliente Android dedicado ao Arena AI com suporte a login por conta do aparelho, notificações em segundo plano, tela sempre acesa e sistema nativo de Extensões & Plugins.",
+                    text = stringResource(R.string.about_description),
                     style = MaterialTheme.typography.bodyMedium
                 )
                 HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
 
-                AboutInfoRow(label = "Versão", value = BuildConfig.VERSION_NAME)
-                AboutInfoRow(label = "Build", value = BuildConfig.VERSION_CODE.toString())
-                AboutInfoRow(label = "Ano", value = stringResource(R.string.app_release_year))
+                AboutInfoRow(label = stringResource(R.string.about_version), value = BuildConfig.VERSION_NAME)
+                AboutInfoRow(label = stringResource(R.string.about_build), value = BuildConfig.VERSION_CODE.toString())
+                AboutInfoRow(label = stringResource(R.string.about_year), value = stringResource(R.string.app_release_year))
                 AboutInfoRow(
-                    label = "Atualização da URL",
+                    label = stringResource(R.string.about_url_updated),
                     value = stringResource(R.string.url_last_updated_date)
                 )
-                AboutInfoRow(label = "URL Principal", value = ARENA_HOME_URL)
+                AboutInfoRow(label = stringResource(R.string.about_main_url), value = ARENA_HOME_URL)
                 if (connectedEmail.isNotBlank()) {
-                    AboutInfoRow(label = "Conta Conectada", value = connectedEmail)
+                    AboutInfoRow(label = stringResource(R.string.about_connected_account), value = connectedEmail)
                 }
-                AboutInfoRow(label = "Configuração JSON", value = "ArenaAI/settings.json")
-                AboutInfoRow(label = "Documentação", value = "ArenaAI/documento.md")
-                AboutInfoRow(label = "Complementos", value = "ArenaAI/extencao & plugin")
+                AboutInfoRow(label = stringResource(R.string.about_json_config), value = "ArenaAI/settings.json")
+                AboutInfoRow(label = stringResource(R.string.about_documentation), value = "ArenaAI/documentation.md")
+                AboutInfoRow(label = stringResource(R.string.about_addons), value = "ArenaAI/extensions & plugins")
             }
         },
         confirmButton = {
@@ -130,7 +143,7 @@ fun AboutArenaDialog(
                 onClick = onDismiss,
                 modifier = Modifier.testTag("about_close_button")
             ) {
-                Text("Fechar")
+                Text(stringResource(R.string.action_close))
             }
         }
     )
@@ -169,8 +182,21 @@ fun AppSettingsDialog(
     onTestNotification: () -> Unit,
     onAuthorizeSafFolder: () -> Unit,
     onOpenGuide: () -> Unit,
+    onClearCacheData: () -> Unit,
+    onResetApp: () -> Unit,
     onDismiss: () -> Unit
 ) {
+    var showLanguagePicker by remember { mutableStateOf(false) }
+    var showResetConfirmation by remember { mutableStateOf(false) }
+
+    val selectedLanguage = remember(settings.language) {
+        AppLanguage.fromCode(settings.language)
+    }
+    val effectiveAutoLanguage = remember(settings.language) {
+        val effectiveCode = ArenaLocaleHelper.resolveEffectiveLanguageCode(settings.language)
+        AppLanguage.fromCode(effectiveCode)
+    }
+
     AlertDialog(
         onDismissRequest = onDismiss,
         title = {
@@ -183,12 +209,12 @@ fun AppSettingsDialog(
                 Spacer(modifier = Modifier.width(10.dp))
                 Column {
                     Text(
-                        text = "Configurações do App",
+                        text = stringResource(R.string.settings_title),
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold
                     )
                     Text(
-                        text = "Salvo em ArenaAI/settings.json",
+                        text = stringResource(R.string.settings_subtitle),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -200,18 +226,107 @@ fun AppSettingsDialog(
                 verticalArrangement = Arrangement.spacedBy(8.dp),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .heightIn(max = 420.dp)
+                    .heightIn(max = 460.dp)
                     .verticalScroll(rememberScrollState())
             ) {
+                // Category 1: General & Language
+                SettingsCategoryHeader(
+                    icon = Icons.Default.Tune,
+                    title = stringResource(R.string.settings_cat_general)
+                )
+
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .minimumInteractiveComponentSize()
+                        .clickable { showLanguagePicker = true }
+                        .testTag("settings_language_button")
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp)
+                    ) {
+                        Box(
+                            contentAlignment = Alignment.Center,
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f))
+                        ) {
+                            Text(
+                                text = if (selectedLanguage == AppLanguage.AUTO) {
+                                    effectiveAutoLanguage.flag
+                                } else {
+                                    selectedLanguage.flag
+                                },
+                                fontSize = 20.sp
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = stringResource(R.string.setting_language_title),
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Text(
+                                text = if (selectedLanguage == AppLanguage.AUTO) {
+                                    stringResource(
+                                        R.string.language_auto_resolved,
+                                        effectiveAutoLanguage.nativeName
+                                    )
+                                } else {
+                                    "${selectedLanguage.displayName} (${selectedLanguage.nativeName})"
+                                },
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.primary,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                            contentDescription = stringResource(R.string.setting_language_title),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+
                 SettingToggleRow(
-                    title = "Tela Cheia",
-                    subtitle = "Ocultar a barra superior para imersão total",
+                    title = stringResource(R.string.setting_fullscreen_title),
+                    subtitle = stringResource(R.string.setting_fullscreen_subtitle),
                     checked = settings.fullscreen,
                     onCheckedChange = { onUpdateSettings(settings.copy(fullscreen = it)) }
                 )
                 SettingToggleRow(
-                    title = "Notificar ao finalizar resposta",
-                    subtitle = "Som e vibração quando a IA terminar",
+                    title = stringResource(R.string.setting_desktop_mode_title),
+                    subtitle = stringResource(R.string.setting_desktop_mode_subtitle),
+                    checked = settings.desktopMode,
+                    onCheckedChange = { onUpdateSettings(settings.copy(desktopMode = it)) }
+                )
+                TextZoomControlRow(
+                    textZoom = settings.textZoom,
+                    onDecrease = {
+                        val updated = (settings.textZoom - 10).coerceIn(80, 140)
+                        onUpdateSettings(settings.copy(textZoom = updated))
+                    },
+                    onIncrease = {
+                        val updated = (settings.textZoom + 10).coerceIn(80, 140)
+                        onUpdateSettings(settings.copy(textZoom = updated))
+                    }
+                )
+
+                // Category 2: Notifications & Background
+                SettingsCategoryHeader(
+                    icon = Icons.Default.Notifications,
+                    title = stringResource(R.string.settings_cat_notifications)
+                )
+                SettingToggleRow(
+                    title = stringResource(R.string.setting_notify_title),
+                    subtitle = stringResource(R.string.setting_notify_subtitle),
                     checked = settings.notifyOnFinish,
                     onCheckedChange = { onUpdateSettings(settings.copy(notifyOnFinish = it)) }
                 )
@@ -230,49 +345,78 @@ fun AppSettingsDialog(
                     Text(stringResource(R.string.action_test_notification))
                 }
                 SettingToggleRow(
-                    title = "Execução em Segundo Plano",
-                    subtitle = "Mantém o app ativo se minimizado ao gerar saída",
+                    title = stringResource(R.string.setting_background_title),
+                    subtitle = stringResource(R.string.setting_background_subtitle),
                     checked = settings.backgroundServiceEnabled,
                     onCheckedChange = { onUpdateSettings(settings.copy(backgroundServiceEnabled = it)) }
                 )
+
+                // Category 3: Display & Power
+                SettingsCategoryHeader(
+                    icon = Icons.Default.BrightnessHigh,
+                    title = stringResource(R.string.settings_cat_display)
+                )
                 SettingToggleRow(
-                    title = "Manter tela ligada (app aberto)",
-                    subtitle = "Impede o celular de apagar a tela com o app aberto",
+                    title = stringResource(R.string.setting_awake_open_title),
+                    subtitle = stringResource(R.string.setting_awake_open_subtitle),
                     checked = settings.keepScreenAwakeOnOpen,
                     onCheckedChange = { onUpdateSettings(settings.copy(keepScreenAwakeOnOpen = it)) }
                 )
                 SettingToggleRow(
-                    title = "Manter tela ligada ao gerar",
-                    subtitle = "Garante tela acesa enquanto o modelo gera resposta",
+                    title = stringResource(R.string.setting_awake_gen_title),
+                    subtitle = stringResource(R.string.setting_awake_gen_subtitle),
                     checked = settings.keepScreenAwakeOnGenerating,
                     onCheckedChange = { onUpdateSettings(settings.copy(keepScreenAwakeOnGenerating = it)) }
                 )
+
+                // Category 4: Account & Privacy
+                SettingsCategoryHeader(
+                    icon = Icons.Default.AccountCircle,
+                    title = stringResource(R.string.settings_cat_account)
+                )
                 SettingToggleRow(
-                    title = "Extensões e Plugins automáticos",
-                    subtitle = "Conecta complementos compatíveis ao abrir o site",
+                    title = stringResource(R.string.setting_autologin_title),
+                    subtitle = stringResource(R.string.setting_autologin_subtitle),
+                    checked = settings.autoLoginPromptEnabled,
+                    onCheckedChange = { onUpdateSettings(settings.copy(autoLoginPromptEnabled = it)) }
+                )
+                SettingToggleRow(
+                    title = stringResource(R.string.setting_keep_cookies_title),
+                    subtitle = stringResource(R.string.setting_keep_cookies_subtitle),
+                    checked = settings.keepSessionCookies,
+                    onCheckedChange = { onUpdateSettings(settings.copy(keepSessionCookies = it)) }
+                )
+
+                // Category 5: Add-ons & Storage
+                SettingsCategoryHeader(
+                    icon = Icons.Default.Extension,
+                    title = stringResource(R.string.settings_cat_addons)
+                )
+                SettingToggleRow(
+                    title = stringResource(R.string.setting_autoload_title),
+                    subtitle = stringResource(R.string.setting_autoload_subtitle),
                     checked = settings.extensionsAutoLoad,
                     onCheckedChange = { onUpdateSettings(settings.copy(extensionsAutoLoad = it)) }
                 )
                 SettingToggleRow(
-                    title = "Buscar complementos ao iniciar",
-                    subtitle = "Lê ArenaAI/extencao e plugin automaticamente",
+                    title = stringResource(R.string.setting_autoscan_title),
+                    subtitle = stringResource(R.string.setting_autoscan_subtitle),
                     checked = settings.autoScanAddonsOnStartup,
                     onCheckedChange = { onUpdateSettings(settings.copy(autoScanAddonsOnStartup = it)) }
                 )
-                SettingToggleRow(
-                    title = "Login com contas do celular",
-                    subtitle = "Abre lista de e-mails ao detectar chamada de login",
-                    checked = settings.autoLoginPromptEnabled,
-                    onCheckedChange = { onUpdateSettings(settings.copy(autoLoginPromptEnabled = it)) }
-                )
 
-                HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
-
-                Text(
-                    text = storageSummary,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        text = storageSummary,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(10.dp)
+                    )
+                }
 
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -284,7 +428,7 @@ fun AppSettingsDialog(
                     ) {
                         Icon(Icons.Default.FolderOpen, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(4.dp))
-                        Text("Pasta ArenaAI", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(stringResource(R.string.btn_arena_folder), maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                     OutlinedButton(
                         onClick = onOpenGuide,
@@ -292,14 +436,286 @@ fun AppSettingsDialog(
                     ) {
                         Icon(Icons.Default.Description, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(4.dp))
-                        Text("documento.md", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(stringResource(R.string.btn_documentation), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                }
+
+                // Category 6: Maintenance & Data
+                SettingsCategoryHeader(
+                    icon = Icons.Default.DeleteSweep,
+                    title = stringResource(R.string.settings_cat_maintenance)
+                )
+                OutlinedButton(
+                    onClick = onClearCacheData,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("settings_clear_cache_button")
+                ) {
+                    Icon(Icons.Default.DeleteSweep, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(stringResource(R.string.action_clear_cache))
+                }
+                FilledTonalButton(
+                    onClick = { showResetConfirmation = true },
+                    colors = ButtonDefaults.filledTonalButtonColors(
+                        containerColor = MaterialTheme.colorScheme.errorContainer,
+                        contentColor = MaterialTheme.colorScheme.onErrorContainer
+                    ),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("settings_reset_app_button")
+                ) {
+                    Icon(Icons.Default.RestartAlt, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(stringResource(R.string.action_reset_app), fontWeight = FontWeight.SemiBold)
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.action_close))
+            }
+        }
+    )
+
+    if (showLanguagePicker) {
+        LanguagePickerDialog(
+            currentLanguageCode = settings.language,
+            onSelectLanguage = { chosen ->
+                showLanguagePicker = false
+                onUpdateSettings(settings.copy(language = chosen.code))
+            },
+            onDismiss = { showLanguagePicker = false }
+        )
+    }
+
+    if (showResetConfirmation) {
+        AlertDialog(
+            onDismissRequest = { showResetConfirmation = false },
+            icon = {
+                Icon(
+                    imageVector = Icons.Default.RestartAlt,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.error
+                )
+            },
+            title = {
+                Text(
+                    text = stringResource(R.string.reset_confirm_title),
+                    fontWeight = FontWeight.Bold
+                )
+            },
+            text = {
+                Text(
+                    text = stringResource(R.string.reset_confirm_message),
+                    style = MaterialTheme.typography.bodyMedium
+                )
+            },
+            confirmButton = {
+                FilledTonalButton(
+                    onClick = {
+                        showResetConfirmation = false
+                        onResetApp()
+                    },
+                    colors = ButtonDefaults.filledTonalButtonColors(
+                        containerColor = MaterialTheme.colorScheme.error,
+                        contentColor = MaterialTheme.colorScheme.onError
+                    ),
+                    modifier = Modifier.testTag("settings_confirm_reset_button")
+                ) {
+                    Text(stringResource(R.string.action_confirm_reset))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showResetConfirmation = false }) {
+                    Text(stringResource(R.string.action_cancel))
+                }
+            }
+        )
+    }
+}
+
+@Composable
+private fun SettingsCategoryHeader(
+    icon: ImageVector,
+    title: String
+) {
+    Column(modifier = Modifier.fillMaxWidth().padding(top = 6.dp, bottom = 2.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(16.dp)
+            )
+            Spacer(modifier = Modifier.width(6.dp))
+            Text(
+                text = title,
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.primary,
+                fontWeight = FontWeight.Bold
+            )
+        }
+        Spacer(modifier = Modifier.height(4.dp))
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f))
+    }
+}
+
+@Composable
+private fun TextZoomControlRow(
+    textZoom: Int,
+    onDecrease: () -> Unit,
+    onIncrease: () -> Unit
+) {
+    Surface(
+        shape = RoundedCornerShape(12.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = stringResource(R.string.setting_text_zoom_title),
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Text(
+                    text = stringResource(R.string.setting_text_zoom_subtitle, textZoom),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            IconButton(
+                onClick = onDecrease,
+                enabled = textZoom > 80,
+                modifier = Modifier.testTag("settings_zoom_decrease")
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Remove,
+                    contentDescription = "-"
+                )
+            }
+            Text(
+                text = "$textZoom%",
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(horizontal = 4.dp)
+            )
+            IconButton(
+                onClick = onIncrease,
+                enabled = textZoom < 140,
+                modifier = Modifier.testTag("settings_zoom_increase")
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Add,
+                    contentDescription = "+"
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun LanguagePickerDialog(
+    currentLanguageCode: String,
+    onSelectLanguage: (AppLanguage) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val selected = AppLanguage.fromCode(currentLanguageCode)
+    val autoTarget = AppLanguage.fromCode(
+        ArenaLocaleHelper.resolveEffectiveLanguageCode(AppLanguage.AUTO.code)
+    )
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(
+                text = stringResource(R.string.language_dialog_title),
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold
+            )
+        },
+        text = {
+            LazyColumn(
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 380.dp)
+            ) {
+                items(AppLanguage.entries, key = { it.code }) { lang ->
+                    val isSelected = lang == selected
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = if (isSelected) {
+                            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.65f)
+                        } else {
+                            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .minimumInteractiveComponentSize()
+                            .clickable { onSelectLanguage(lang) }
+                            .testTag("language_option_${lang.code}")
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp)
+                        ) {
+                            Text(
+                                text = lang.flag,
+                                fontSize = 22.sp
+                            )
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = if (lang == AppLanguage.AUTO) {
+                                        stringResource(R.string.language_auto_label)
+                                    } else {
+                                        lang.displayName
+                                    },
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.SemiBold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Text(
+                                    text = if (lang == AppLanguage.AUTO) {
+                                        "${autoTarget.flag} ${autoTarget.nativeName}"
+                                    } else {
+                                        lang.nativeName
+                                    },
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Icon(
+                                imageVector = if (isSelected) {
+                                    Icons.Default.RadioButtonChecked
+                                } else {
+                                    Icons.Default.RadioButtonUnchecked
+                                },
+                                contentDescription = null,
+                                tint = if (isSelected) {
+                                    MaterialTheme.colorScheme.primary
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                }
+                            )
+                        }
                     }
                 }
             }
         },
         confirmButton = {
             TextButton(onClick = onDismiss) {
-                Text("Fechar")
+                Text(stringResource(R.string.action_close))
             }
         }
     )
@@ -379,7 +795,7 @@ fun ExtensionSettingsDialog(
                         fontWeight = FontWeight.Bold
                     )
                     Text(
-                        text = "Compatível com Arena AI v${BuildConfig.VERSION_NAME} e arena.ai/agent",
+                        text = stringResource(R.string.ext_dialog_subtitle, BuildConfig.VERSION_NAME),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -399,12 +815,12 @@ fun ExtensionSettingsDialog(
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                text = "Executar ao abrir o site",
+                                text = stringResource(R.string.ext_run_on_open_title),
                                 style = MaterialTheme.typography.bodyMedium,
                                 fontWeight = FontWeight.SemiBold
                             )
                             Text(
-                                text = "Injeta extensões e plugins ativos no arena.ai",
+                                text = stringResource(R.string.ext_run_on_open_subtitle),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -431,7 +847,7 @@ fun ExtensionSettingsDialog(
                     ) {
                         Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(4.dp))
-                        Text(if (isScanning) "Lendo…" else "Reescanear")
+                        Text(if (isScanning) stringResource(R.string.ext_scanning) else stringResource(R.string.ext_rescan))
                     }
                     FilledTonalButton(
                         onClick = { showImportTypeChooser = true },
@@ -439,7 +855,7 @@ fun ExtensionSettingsDialog(
                     ) {
                         Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(4.dp))
-                        Text("Importar")
+                        Text(stringResource(R.string.ext_import))
                     }
                     OutlinedButton(
                         onClick = onAuthorizeSafFolder,
@@ -447,7 +863,7 @@ fun ExtensionSettingsDialog(
                     ) {
                         Icon(Icons.Default.FolderOpen, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(4.dp))
-                        Text("Pasta ArenaAI")
+                        Text(stringResource(R.string.btn_arena_folder))
                     }
                     OutlinedButton(
                         onClick = onOpenGuide,
@@ -455,7 +871,7 @@ fun ExtensionSettingsDialog(
                     ) {
                         Icon(Icons.Default.Description, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(4.dp))
-                        Text("documento.md")
+                        Text(stringResource(R.string.btn_documentation))
                     }
                 }
 
@@ -483,13 +899,13 @@ fun ExtensionSettingsDialog(
                             )
                             Spacer(modifier = Modifier.height(8.dp))
                             Text(
-                                text = "Nenhum complemento encontrado",
+                                text = stringResource(R.string.ext_empty_title),
                                 style = MaterialTheme.typography.titleSmall,
                                 fontWeight = FontWeight.Bold
                             )
                             Spacer(modifier = Modifier.height(4.dp))
                             Text(
-                                text = "Coloque arquivos .js ou manifest.json nas subpastas extencao/ ou plugin/ dentro de ArenaAI, ou toque em Importar.",
+                                text = stringResource(R.string.ext_empty_desc),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -521,7 +937,7 @@ fun ExtensionSettingsDialog(
         },
         confirmButton = {
             TextButton(onClick = onDismiss) {
-                Text("Concluir")
+                Text(stringResource(R.string.action_done))
             }
         }
     )
@@ -529,10 +945,8 @@ fun ExtensionSettingsDialog(
     if (showImportTypeChooser) {
         AlertDialog(
             onDismissRequest = { showImportTypeChooser = false },
-            title = { Text("Importar Complemento") },
-            text = {
-                Text("Escolha em qual subpasta de ArenaAI deseja salvar e conectar o arquivo (.js ou .json):")
-            },
+            title = { Text(stringResource(R.string.ext_import_title)) },
+            text = { Text(stringResource(R.string.ext_import_desc)) },
             confirmButton = {
                 TextButton(
                     onClick = {
@@ -540,7 +954,7 @@ fun ExtensionSettingsDialog(
                         onImportAddon(AddonType.EXTENSION)
                     }
                 ) {
-                    Text("Extensão (extencao/)")
+                    Text(stringResource(R.string.ext_folder_extension))
                 }
             },
             dismissButton = {
@@ -550,7 +964,7 @@ fun ExtensionSettingsDialog(
                         onImportAddon(AddonType.PLUGIN)
                     }
                 ) {
-                    Text("Plugin (plugin/)")
+                    Text(stringResource(R.string.ext_folder_plugin))
                 }
             }
         )
@@ -594,7 +1008,11 @@ private fun AddonItemCard(
                             }
                         ) {
                             Text(
-                                text = if (addon.type == AddonType.PLUGIN) "Plugin" else "Extensão",
+                                text = if (addon.type == AddonType.PLUGIN) {
+                                    stringResource(R.string.ext_type_plugin)
+                                } else {
+                                    stringResource(R.string.ext_type_extension)
+                                },
                                 style = MaterialTheme.typography.labelSmall,
                                 modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                             )
@@ -618,7 +1036,7 @@ private fun AddonItemCard(
                 ) {
                     Icon(
                         imageVector = Icons.Default.Delete,
-                        contentDescription = "Remover",
+                        contentDescription = stringResource(R.string.action_remove),
                         tint = MaterialTheme.colorScheme.error,
                         modifier = Modifier.size(18.dp)
                     )
@@ -698,7 +1116,7 @@ fun MarkdownGuideDialog(
         },
         confirmButton = {
             TextButton(onClick = onDismiss) {
-                Text("Fechar")
+                Text(stringResource(R.string.action_close))
             }
         }
     )

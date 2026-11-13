@@ -41,14 +41,14 @@ object ArenaAddonManager {
     fun scanAllAddons(context: Context, settings: ArenaSettings): List<ArenaAddon> {
         val found = linkedMapOf<String, ArenaAddon>()
 
-        // 1. Scan App External Mirror: <externalFilesDir>/ArenaAI/{extencao, plugin}
+        // 1. Scan App External Mirror: <externalFilesDir>/ArenaAI/{extensions, plugins}
         val appExternalRoot = context.getExternalFilesDir(null)
         if (appExternalRoot != null) {
             val arenaRoot = File(appExternalRoot, ArenaSettingsRepository.ROOT_FOLDER)
             scanArenaRootFileDir(arenaRoot, settings, found)
         }
 
-        // 2. Scan /storage/emulated/0/ArenaAI/{extencao, plugin} if readable
+        // 2. Scan /storage/emulated/0/ArenaAI/{extensions, plugins} if readable
         try {
             @Suppress("DEPRECATION")
             val rootStorage = Environment.getExternalStorageDirectory()
@@ -58,7 +58,7 @@ object ArenaAddonManager {
         } catch (_: Exception) {
         }
 
-        // 3. Scan Public Documents/ArenaAI/{extencao, plugin} directly if accessible
+        // 3. Scan Public Documents/ArenaAI/{extensions, plugins} directly if accessible
         try {
             @Suppress("DEPRECATION")
             val docsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS)
@@ -66,7 +66,7 @@ object ArenaAddonManager {
         } catch (_: Exception) {
         }
 
-        // 4. Scan MediaStore entries inside Documents/ArenaAI/{extencao, plugin} (Android 10+)
+        // 4. Scan MediaStore entries inside Documents/ArenaAI/{extensions, plugins} (Android 10+)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             scanMediaStoreAddons(context, settings, found)
         }
@@ -88,9 +88,11 @@ object ArenaAddonManager {
         found: MutableMap<String, ArenaAddon>
     ) {
         scanLocalDirectory(File(arenaRoot, ArenaSettingsRepository.EXTENSIONS_SUBFOLDER), AddonType.EXTENSION, settings, found)
-        scanLocalDirectory(File(arenaRoot, ArenaSettingsRepository.EXTENSIONS_ALT_SUBFOLDER), AddonType.EXTENSION, settings, found)
+        scanLocalDirectory(File(arenaRoot, "extension"), AddonType.EXTENSION, settings, found)
+        scanLocalDirectory(File(arenaRoot, ArenaSettingsRepository.LEGACY_EXTENSIONS_SUBFOLDER), AddonType.EXTENSION, settings, found)
+        scanLocalDirectory(File(arenaRoot, ArenaSettingsRepository.LEGACY_EXTENSIONS_ALT_SUBFOLDER), AddonType.EXTENSION, settings, found)
         scanLocalDirectory(File(arenaRoot, ArenaSettingsRepository.PLUGINS_SUBFOLDER), AddonType.PLUGIN, settings, found)
-        scanLocalDirectory(File(arenaRoot, "plugins"), AddonType.PLUGIN, settings, found)
+        scanLocalDirectory(File(arenaRoot, ArenaSettingsRepository.LEGACY_PLUGINS_SUBFOLDER), AddonType.PLUGIN, settings, found)
     }
 
     private fun scanLocalDirectory(
@@ -175,8 +177,9 @@ object ArenaAddonManager {
                     if (lower == ArenaSettingsRepository.SETTINGS_FILE_NAME) continue
                     if (!lower.endsWith(".js") && !lower.endsWith(".mjs") && !lower.endsWith(".json")) continue
 
-                    // Only scan files inside extencao/extensão or plugin/plugins subfolders
-                    val inExtFolder = relPath.contains("extencao", ignoreCase = true) ||
+                    // Only scan files inside extension or plugin subfolders
+                    val inExtFolder = relPath.contains("extension", ignoreCase = true) ||
+                        relPath.contains("extencao", ignoreCase = true) ||
                         relPath.contains("extensão", ignoreCase = true)
                     val inPluginFolder = relPath.contains("plugin", ignoreCase = true)
                     if (!inExtFolder && !inPluginFolder) continue
@@ -313,8 +316,8 @@ object ArenaAddonManager {
                 typeStr == "extension" || typeStr == "extensao" || typeStr == "extensão" -> AddonType.EXTENSION
                 else -> defaultType
             }
-            val description = obj.optString("description", "Complemento personalizado para Arena AI.")
-            val author = obj.optString("author", "Desenvolvedor")
+            val description = obj.optString("description", "Custom add-on for Arena AI.")
+            val author = obj.optString("author", "Developer")
             val minAppVersion = obj.optString("minAppVersion", "1.0.0")
             val declaredCompatible = obj.optBoolean("compatible", true)
 
@@ -388,7 +391,7 @@ object ArenaAddonManager {
             typeTag == "extension" || typeTag == "extensao" || typeTag == "extensão" -> AddonType.EXTENSION
             else -> defaultType
         }
-        val description = extractTag("description") ?: "Script JavaScript carregado da pasta ArenaAI."
+        val description = extractTag("description") ?: "JavaScript add-on loaded from ArenaAI directory."
         val author = extractTag("author") ?: "Local"
         val minAppVersion = extractTag("minAppVersion") ?: "1.0.0"
         val compatibleFlag = extractTag("compatible")?.lowercase() != "false"
@@ -423,21 +426,21 @@ object ArenaAddonManager {
         cssContent: String
     ): Pair<Boolean, String> {
         if (!declaredCompatible) {
-            return false to "Marcado como incompatível no manifesto."
+            return false to "Marked as incompatible in manifest."
         }
         if (compareVersions(APP_VERSION, minAppVersion) < 0) {
-            return false to "Requer Arena AI v$minAppVersion ou superior (atual: v$APP_VERSION)."
+            return false to "Requires Arena AI v$minAppVersion or higher (current: v$APP_VERSION)."
         }
         if (scriptContent.isBlank() && cssContent.isBlank()) {
-            return false to "Nenhum script (.js) ou estilo (.css) encontrado."
+            return false to "No script (.js) or stylesheet (.css) found."
         }
         val urlMatches = matchUrls.any { pattern ->
             pattern == "*" || pattern == "*://*/*" || pattern.contains("arena.ai", ignoreCase = true)
         }
         if (!urlMatches) {
-            return false to "URL alvo incompatível com arena.ai."
+            return false to "Target URL is incompatible with arena.ai."
         }
-        return true to "Compatível com Arena AI v$APP_VERSION"
+        return true to "Compatible with Arena AI v$APP_VERSION"
     }
 
     private fun compareVersions(current: String, required: String): Int {
@@ -459,9 +462,9 @@ object ArenaAddonManager {
         settings: ArenaSettings
     ): Result<String> {
         return try {
-            val fileName = queryDisplayName(context, uri) ?: "complemento_${System.currentTimeMillis()}.js"
+            val fileName = queryDisplayName(context, uri) ?: "addon_${System.currentTimeMillis()}.js"
             val content = context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
-                ?: return Result.failure(IllegalStateException("Não foi possível ler o arquivo selecionado."))
+                ?: return Result.failure(IllegalStateException("Could not read the selected file."))
 
             val subfolder = if (type == AddonType.PLUGIN) {
                 ArenaSettingsRepository.PLUGINS_SUBFOLDER
@@ -525,9 +528,15 @@ object ArenaAddonManager {
         }
     }
 
-    fun buildSiteSdkAndAddonsScript(addons: List<ArenaAddon>, connectedEmail: String): String {
+    fun buildSiteSdkAndAddonsScript(
+        addons: List<ArenaAddon>,
+        connectedEmail: String,
+        languageCode: String = ArenaLocaleHelper.resolveEffectiveLanguageCode(AppLanguage.AUTO.code)
+    ): String {
         val activeAddons = addons.filter { it.compatible && it.isEnabled }
         val safeEmail = JSONObject.quote(connectedEmail)
+        val resolvedLang = ArenaLocaleHelper.resolveEffectiveLanguageCode(languageCode)
+        val safeLang = JSONObject.quote(resolvedLang)
 
         val sdkHeader = """
 (function() {
@@ -541,6 +550,7 @@ object ArenaAddonManager {
         window.ArenaAI = {
             version: ${JSONObject.quote(APP_VERSION)},
             platform: 'android-webview',
+            language: $safeLang,
             connectedEmail: $safeEmail,
             extensions: _registeredExtensions,
             plugins: _registeredPlugins,
@@ -771,6 +781,10 @@ object ArenaAddonManager {
         };
     } else {
         window.ArenaAI.connectedEmail = $safeEmail;
+        if (window.ArenaAI.language !== $safeLang) {
+            window.ArenaAI.language = $safeLang;
+            window.dispatchEvent(new CustomEvent('arena-ai-language', { detail: { language: $safeLang } }));
+        }
         window.ArenaAI.fs = window.ArenaFS || window.ArenaAI.fs || null;
     }
 })();

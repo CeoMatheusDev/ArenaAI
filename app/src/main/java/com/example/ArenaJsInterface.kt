@@ -16,7 +16,7 @@ class ArenaJsInterface(
     fun onGenerationStarted() {
         mainHandler.post {
             state.isGenerating = true
-            if (state.backgroundServiceEnabled) {
+            if (state.backgroundServiceEnabled && state.notifyOnFinish) {
                 NotificationHelper.startBackgroundService(context)
             }
         }
@@ -30,6 +30,8 @@ class ArenaJsInterface(
 
             if (state.notifyOnFinish) {
                 NotificationHelper.showResponseNotification(context, preview)
+            } else {
+                NotificationHelper.cancelAllNotifications(context)
             }
         }
     }
@@ -44,6 +46,9 @@ class ArenaJsInterface(
     @JavascriptInterface
     fun showCustomNotification(title: String, message: String) {
         mainHandler.post {
+            if (!state.notifyOnFinish) {
+                return@post
+            }
             NotificationHelper.showResponseNotification(
                 context,
                 if (title.isNotBlank()) "$title: $message" else message
@@ -58,11 +63,14 @@ class ArenaJsInterface(
     window._arenaMonitorInstalled = true;
 
     var isGenerating = false;
+    var sawStopButton = false;
     var settleTimer = null;
     var checkInterval = null;
     var lastLoginPromptAt = 0;
     var lastChatMutationAt = Date.now();
+    var lastIdleObservedAt = 0;
     var DOM_SETTLE_DEBOUNCE_MS = 1000;
+    var IDLE_CONFIRM_MS = 1800;
 
     function isAddonElement(node) {
         if (!node) return false;
@@ -75,53 +83,90 @@ class ArenaJsInterface(
         return document.querySelector('main, [role="main"], [class*="chat" i], [class*="conversation" i], [class*="messages" i]') || document.body;
     }
 
-    function isStillActive() {
-        var stopBtn = document.querySelector(
-            'button[aria-label*="stop" i], ' +
-            'button[aria-label*="parar" i], ' +
-            'button[title*="stop" i], ' +
-            'button[title*="parar" i], ' +
-            'button[data-testid*="stop" i], ' +
-            'button:has(svg rect), ' +
-            'button:has(svg [fill="currentColor"][width="14"]), ' +
-            'button:has(svg [fill="currentColor"][width="12"])'
+    /**
+     * Exact detection for Arena AI composer button:
+     * - While generating: button[data-perf-target="send"] has aria-label="Stop generating" and <svg><rect .../></svg> (square stop icon).
+     * - When finished: button[data-perf-target="send"] switches back to aria-label="Send message" with the right-arrow <svg> (no <rect>).
+     */
+    function isStopButtonActive() {
+        var composerBtn = document.querySelector('button[data-perf-target="send"]');
+        if (composerBtn) {
+            var label = (composerBtn.getAttribute('aria-label') || '').toLowerCase();
+            if (label.indexOf('stop') !== -1) return true;
+            if (composerBtn.querySelector('svg rect')) return true;
+            if (label.indexOf('send') !== -1) return false;
+        }
+        return !!document.querySelector(
+            'button[aria-label="Stop generating"], ' +
+            'button[aria-label*="Stop generating" i], ' +
+            'button[title*="Stop generating" i], ' +
+            'button[data-testid*="stop" i]'
         );
-
-        var streamingIndicator = document.querySelector(
-            '.streaming, .cursor-blink, .animate-pulse, [data-is-streaming="true"], .result-streaming'
-        );
-
-        var thinkingElement = document.querySelector(
-            '[data-testid*="thinking"], .thinking, .reasoning, [aria-label*="thinking" i]'
-        );
-
-        var submitBtn = document.querySelector('button[type="submit"], button[aria-label*="send" i], button[aria-label*="enviar" i]');
-        var submitDisabledWithSpinner = submitBtn && submitBtn.disabled && (submitBtn.querySelector('svg.animate-spin') || submitBtn.querySelector('.spinner'));
-
-        return !!(stopBtn || streamingIndicator || submitDisabledWithSpinner || (thinkingElement && thinkingElement.textContent.trim().length > 0));
     }
 
-    function scheduleSettleCheck() {
+    function isSendButtonIdle() {
+        var composerBtn = document.querySelector('button[data-perf-target="send"]');
+        if (composerBtn) {
+            var label = (composerBtn.getAttribute('aria-label') || '').toLowerCase();
+            var hasStopSquare = !!composerBtn.querySelector('svg rect');
+            return label.indexOf('send') !== -1 && !hasStopSquare;
+        }
+        var sendBtn = document.querySelector('button[aria-label="Send message"], button[aria-label*="Send message" i]');
+        return !!(sendBtn && !sendBtn.querySelector('svg rect'));
+    }
+
+    function isStillActive() {
+        if (isStopButtonActive()) return true;
+        var explicitStreaming = document.querySelector(
+            '[data-is-streaming="true"], .result-streaming'
+        );
+        return !!explicitStreaming;
+    }
+
+    function clearSettleTimer() {
         if (settleTimer) {
             clearTimeout(settleTimer);
             settleTimer = null;
         }
-        var elapsedSinceMutation = Date.now() - lastChatMutationAt;
-        var waitMs = Math.max(DOM_SETTLE_DEBOUNCE_MS - elapsedSinceMutation, DOM_SETTLE_DEBOUNCE_MS);
+    }
+
+    function scheduleSettleCheck() {
+        clearSettleTimer();
+        var now = Date.now();
+        if (!lastIdleObservedAt) {
+            lastIdleObservedAt = now;
+        }
+        var remainingIdle = Math.max(0, IDLE_CONFIRM_MS - (now - lastIdleObservedAt));
+        var remainingDomQuiet = Math.max(0, DOM_SETTLE_DEBOUNCE_MS - (now - lastChatMutationAt));
+        var waitMs = Math.max(remainingIdle, remainingDomQuiet, 350);
+
         settleTimer = setTimeout(function() {
             settleTimer = null;
-            if (!isGenerating) return;
+            if (!isGenerating || !sawStopButton) return;
+
             if (isStillActive()) {
+                lastIdleObservedAt = 0;
                 return;
             }
-            var quietFor = Date.now() - lastChatMutationAt;
-            if (quietFor < DOM_SETTLE_DEBOUNCE_MS) {
-                // DOM mutated recently (e.g. React still rendering modal buttons); wait until 1s of full stillness
+
+            if (!isSendButtonIdle()) {
+                // Composer has not returned to the right-arrow "Send message" button yet; keep waiting
+                lastIdleObservedAt = 0;
+                scheduleSettleCheck();
+                return;
+            }
+
+            var currentNow = Date.now();
+            var quietFor = currentNow - lastChatMutationAt;
+            var idleFor = currentNow - lastIdleObservedAt;
+            if (quietFor < DOM_SETTLE_DEBOUNCE_MS || idleFor < IDLE_CONFIRM_MS) {
                 scheduleSettleCheck();
                 return;
             }
 
             isGenerating = false;
+            sawStopButton = false;
+            lastIdleObservedAt = 0;
 
             var assistantBlocks = document.querySelectorAll(
                 '[data-message-author-role="assistant"], .prose, .markdown, .agent-response, [class*="assistant"], [class*="agent-message"]'
@@ -141,24 +186,41 @@ class ArenaJsInterface(
     }
 
     function detectGeneratingState() {
-        var activeNow = isStillActive();
+        var stopActive = isStopButtonActive();
+        var activeNow = stopActive || isStillActive();
 
-        if (activeNow && !isGenerating) {
-            isGenerating = true;
-            if (settleTimer) {
-                clearTimeout(settleTimer);
-                settleTimer = null;
+        if (activeNow) {
+            if (stopActive) {
+                sawStopButton = true;
             }
-            if (window.AndroidBridge) {
-                window.AndroidBridge.onGenerationStarted();
+            lastIdleObservedAt = 0;
+            clearSettleTimer();
+            if (!isGenerating && stopActive) {
+                isGenerating = true;
+                if (window.AndroidBridge) {
+                    window.AndroidBridge.onGenerationStarted();
+                }
             }
-        } else if (!activeNow && isGenerating) {
-            if (!settleTimer) {
-                scheduleSettleCheck();
+        } else if (isGenerating) {
+            if (!sawStopButton) {
+                // Generation state was never confirmed by the Stop square button; reset quietly
+                isGenerating = false;
+                lastIdleObservedAt = 0;
+                clearSettleTimer();
+                return;
             }
-        } else if (activeNow && settleTimer) {
-            clearTimeout(settleTimer);
-            settleTimer = null;
+            if (isSendButtonIdle()) {
+                if (!lastIdleObservedAt) {
+                    lastIdleObservedAt = Date.now();
+                }
+                if (!settleTimer) {
+                    scheduleSettleCheck();
+                }
+            } else {
+                // Neither Stop square nor Send arrow is visible yet (e.g. React re-rendering between tool steps)
+                lastIdleObservedAt = 0;
+                clearSettleTimer();
+            }
         }
     }
 
@@ -191,7 +253,7 @@ class ArenaJsInterface(
             }
         }
 
-        if (el && !isAddonElement(el) && (el.closest('button[type="submit"]') || el.closest('button[aria-label*="send" i]') || el.closest('button[aria-label*="enviar" i]') || el.closest('button:has(svg)'))) {
+        if (el && !isAddonElement(el) && (el.closest('button[data-perf-target="send"]') || el.closest('button[type="submit"]') || el.closest('button[aria-label*="send" i]'))) {
             var textarea = document.querySelector('textarea');
             if (textarea && textarea.value && window.ArenaAI && window.ArenaAI._emitPromptSubmit) {
                 window.ArenaAI._emitPromptSubmit(textarea.value);
@@ -220,8 +282,7 @@ class ArenaJsInterface(
         }
         if (hasChatMutation) {
             lastChatMutationAt = Date.now();
-            if (isGenerating && settleTimer) {
-                // Reset 1s debounce whenever React updates the chat DOM
+            if (isGenerating && settleTimer && !isStillActive() && isSendButtonIdle()) {
                 scheduleSettleCheck();
             }
             detectGeneratingState();
@@ -229,9 +290,9 @@ class ArenaJsInterface(
     });
 
     function attachObserver() {
-        var container = getChatContainer();
-        if (container) {
-            observer.observe(container, { childList: true, subtree: true, characterData: true, attributes: true });
+        var root = document.body || getChatContainer();
+        if (root) {
+            observer.observe(root, { childList: true, subtree: true, characterData: true, attributes: true });
         }
     }
 
@@ -241,7 +302,7 @@ class ArenaJsInterface(
         document.addEventListener('DOMContentLoaded', attachObserver);
     }
 
-    checkInterval = setInterval(detectGeneratingState, 800);
+    checkInterval = setInterval(detectGeneratingState, 600);
 })();
         """
     }

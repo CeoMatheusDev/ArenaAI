@@ -1,5 +1,6 @@
 package com.example
 
+import android.app.NotificationManager
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import org.junit.Assert.assertEquals
@@ -8,147 +9,250 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.Shadows
 import org.robolectric.annotation.Config
 import java.io.File
+import java.util.Locale
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [36])
 class ExampleRobolectricTest {
 
-  @Test
-  fun `read string from context`() {
-    val context = ApplicationProvider.getApplicationContext<Context>()
-    val appName = context.getString(R.string.app_name)
-    assertEquals("Arena AI", appName)
-  }
+    @Test
+    fun `default apk language is english`() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        assertEquals("Arena AI", context.getString(R.string.app_name))
+        assertEquals("App Settings", context.getString(R.string.settings_title))
+        assertEquals("Extension", context.getString(R.string.action_extensions))
+    }
 
-  @Test
-  fun `settings json persists all app configurations and active addons`() {
-    val context = ApplicationProvider.getApplicationContext<Context>()
-    val saved = ArenaSettings(
-      fullscreen = true,
-      notifyOnFinish = false,
-      backgroundServiceEnabled = false,
-      keepScreenAwakeOnOpen = true,
-      keepScreenAwakeOnGenerating = false,
-      extensionsAutoLoad = true,
-      autoScanAddonsOnStartup = false,
-      autoLoginPromptEnabled = true,
-      connectedEmail = "teste@gmail.com",
-      activeExtensions = listOf("ext-1"),
-      activePlugins = listOf("plug-1")
-    )
-    ArenaSettingsRepository.saveSettings(context, saved)
+    @Test
+    fun `settings json persists all app configurations language and active addons`() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val saved = ArenaSettings(
+            fullscreen = true,
+            desktopMode = true,
+            textZoom = 120,
+            notifyOnFinish = false,
+            backgroundServiceEnabled = false,
+            keepScreenAwakeOnOpen = true,
+            keepScreenAwakeOnGenerating = false,
+            extensionsAutoLoad = true,
+            autoScanAddonsOnStartup = false,
+            autoLoginPromptEnabled = true,
+            keepSessionCookies = false,
+            language = AppLanguage.SPANISH.code,
+            connectedEmail = "test@gmail.com",
+            activeExtensions = listOf("ext-1"),
+            activePlugins = listOf("plug-1")
+        )
+        ArenaSettingsRepository.saveSettings(context, saved)
 
-    val root = context.getExternalFilesDir(null)!!
-    val settingsFile = File(root, "${ArenaSettingsRepository.ROOT_FOLDER}/${ArenaSettingsRepository.SETTINGS_FILE_NAME}")
-    assertTrue(settingsFile.exists())
+        val root = context.getExternalFilesDir(null)!!
+        val settingsFile = File(root, "${ArenaSettingsRepository.ROOT_FOLDER}/${ArenaSettingsRepository.SETTINGS_FILE_NAME}")
+        assertTrue(settingsFile.exists())
 
-    val loaded = ArenaSettingsRepository.loadSettings(context)
-    assertTrue(loaded.fullscreen)
-    assertFalse(loaded.notifyOnFinish)
-    assertFalse(loaded.backgroundServiceEnabled)
-    assertTrue(loaded.keepScreenAwakeOnOpen)
-    assertFalse(loaded.keepScreenAwakeOnGenerating)
-    assertFalse(loaded.autoScanAddonsOnStartup)
-    assertEquals("teste@gmail.com", loaded.connectedEmail)
-    assertEquals(listOf("ext-1"), loaded.activeExtensions)
-    assertEquals(listOf("plug-1"), loaded.activePlugins)
-  }
+        val loaded = ArenaSettingsRepository.loadSettings(context)
+        assertTrue(loaded.fullscreen)
+        assertTrue(loaded.desktopMode)
+        assertEquals(120, loaded.textZoom)
+        assertFalse(loaded.notifyOnFinish)
+        assertFalse(loaded.backgroundServiceEnabled)
+        assertTrue(loaded.keepScreenAwakeOnOpen)
+        assertFalse(loaded.keepScreenAwakeOnGenerating)
+        assertFalse(loaded.autoScanAddonsOnStartup)
+        assertFalse(loaded.keepSessionCookies)
+        assertEquals(AppLanguage.SPANISH.code, loaded.language)
+        assertEquals("test@gmail.com", loaded.connectedEmail)
+        assertEquals(listOf("ext-1"), loaded.activeExtensions)
+        assertEquals(listOf("plug-1"), loaded.activePlugins)
+    }
 
-  @Test
-  fun `addon workspace creates ArenaAI extencao plugin documento md and settings json`() {
-    val context = ApplicationProvider.getApplicationContext<Context>()
-    ArenaSettingsRepository.ensureAddonWorkspaceInitialized(context)
+    @Test
+    fun `resetAllAppData wipes custom ArenaAI files and restores english defaults`() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        ArenaSettingsRepository.saveSettings(
+            context,
+            ArenaSettings(
+                fullscreen = true,
+                desktopMode = true,
+                textZoom = 130,
+                keepSessionCookies = false,
+                language = AppLanguage.PORTUGUESE_BR.code,
+                connectedEmail = "user@gmail.com"
+            )
+        )
+        val root = context.getExternalFilesDir(null)!!
+        val customAddon = File(root, "${ArenaSettingsRepository.ROOT_FOLDER}/${ArenaSettingsRepository.PLUGINS_SUBFOLDER}/custom.js")
+        customAddon.parentFile?.mkdirs()
+        customAddon.writeText("// custom")
+        assertTrue(customAddon.exists())
 
-    val root = context.getExternalFilesDir(null)!!
-    val guide = File(root, "${ArenaSettingsRepository.ROOT_FOLDER}/${ArenaSettingsRepository.GUIDE_FILE_NAME}")
-    val settingsFile = File(root, "${ArenaSettingsRepository.ROOT_FOLDER}/${ArenaSettingsRepository.SETTINGS_FILE_NAME}")
-    val extDir = File(root, "${ArenaSettingsRepository.ROOT_FOLDER}/${ArenaSettingsRepository.EXTENSIONS_SUBFOLDER}")
-    val pluginDir = File(root, "${ArenaSettingsRepository.ROOT_FOLDER}/${ArenaSettingsRepository.PLUGINS_SUBFOLDER}")
+        val reset = ArenaSettingsRepository.resetAllAppData(context)
 
-    assertTrue(guide.exists())
-    assertTrue(settingsFile.exists())
-    assertTrue(extDir.isDirectory)
-    assertTrue(pluginDir.isDirectory)
+        assertFalse(customAddon.exists())
+        assertFalse(reset.fullscreen)
+        assertFalse(reset.desktopMode)
+        assertEquals(100, reset.textZoom)
+        assertTrue(reset.keepSessionCookies)
+        assertEquals(AppLanguage.AUTO.code, reset.language)
+        assertEquals("", reset.connectedEmail)
 
-    // Clean workspace should have 0 addons (settings.json and LEIA_ME.txt must be ignored)
-    val initialAddons = ArenaAddonManager.scanAllAddons(context, ArenaSettings())
-    assertEquals(0, initialAddons.size)
+        val guide = File(root, "${ArenaSettingsRepository.ROOT_FOLDER}/${ArenaSettingsRepository.GUIDE_FILE_NAME}")
+        val settingsFile = File(root, "${ArenaSettingsRepository.ROOT_FOLDER}/${ArenaSettingsRepository.SETTINGS_FILE_NAME}")
+        val extDir = File(root, "${ArenaSettingsRepository.ROOT_FOLDER}/${ArenaSettingsRepository.EXTENSIONS_SUBFOLDER}")
+        val pluginDir = File(root, "${ArenaSettingsRepository.ROOT_FOLDER}/${ArenaSettingsRepository.PLUGINS_SUBFOLDER}")
+        assertTrue(guide.exists())
+        assertTrue(settingsFile.exists())
+        assertTrue(extDir.isDirectory)
+        assertTrue(pluginDir.isDirectory)
+    }
 
-    // Add a valid JS plugin and verify discovery and compatibility
-    val pluginFile = File(pluginDir, "meu_plugin.js")
-    pluginFile.writeText(
-      """
-      // ==ArenaAI==
-      // @id           meu-plugin
-      // @name         Meu Plugin
-      // @version      1.0.0
-      // @type         plugin
-      // @minAppVersion 2.0.0
-      // @match        *://arena.ai/*
-      // @compatible   true
-      // ==/ArenaAI==
-      window.ArenaAI.registerPlugin({ id: 'meu-plugin' });
-      """.trimIndent()
-    )
+    @Test
+    fun `addon workspace creates ArenaAI extensions plugins documentation md and settings json`() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        ArenaSettingsRepository.ensureAddonWorkspaceInitialized(context)
 
-    val afterAdd = ArenaAddonManager.scanAllAddons(context, ArenaSettings())
-    assertEquals(1, afterAdd.size)
-    assertEquals("Meu Plugin", afterAdd.first().name)
-    assertEquals(AddonType.PLUGIN, afterAdd.first().type)
-    assertTrue(afterAdd.first().compatible)
-  }
+        val root = context.getExternalFilesDir(null)!!
+        val guide = File(root, "${ArenaSettingsRepository.ROOT_FOLDER}/${ArenaSettingsRepository.GUIDE_FILE_NAME}")
+        val settingsFile = File(root, "${ArenaSettingsRepository.ROOT_FOLDER}/${ArenaSettingsRepository.SETTINGS_FILE_NAME}")
+        val extDir = File(root, "${ArenaSettingsRepository.ROOT_FOLDER}/${ArenaSettingsRepository.EXTENSIONS_SUBFOLDER}")
+        val pluginDir = File(root, "${ArenaSettingsRepository.ROOT_FOLDER}/${ArenaSettingsRepository.PLUGINS_SUBFOLDER}")
 
-  @Test
-  fun `account helper detects auth urls and appends login hint`() {
-    assertTrue(ArenaAccountHelper.isLoginOrAuthUrl("https://accounts.google.com/o/oauth2/v2/auth"))
-    assertTrue(ArenaAccountHelper.isLoginOrAuthUrl("https://arena.ai/login"))
-    assertFalse(ArenaAccountHelper.isLoginOrAuthUrl("https://arena.ai/agent"))
+        assertTrue(guide.exists())
+        assertTrue(guide.readText().contains("Official Extensions and Plugins Documentation"))
+        assertTrue(settingsFile.exists())
+        assertTrue(extDir.isDirectory)
+        assertTrue(pluginDir.isDirectory)
 
-    val hinted = ArenaAccountHelper.appendLoginHintIfGoogleOAuth(
-      "https://accounts.google.com/o/oauth2/v2/auth?client_id=123",
-      "user@gmail.com"
-    )
-    assertTrue(hinted.contains("login_hint=user%40gmail.com"))
-  }
+        // Clean workspace should have 0 addons (settings.json and README.txt must be ignored)
+        val initialAddons = ArenaAddonManager.scanAllAddons(context, ArenaSettings())
+        assertEquals(0, initialAddons.size)
 
-  @Test
-  fun `file bridge ArenaFS reads writes lists and blocks sandbox escape`() {
-    val context = ApplicationProvider.getApplicationContext<Context>()
-    ArenaSettingsRepository.ensureAddonWorkspaceInitialized(context)
+        // Add a valid JS plugin and verify discovery and compatibility
+        val pluginFile = File(pluginDir, "my_plugin.js")
+        pluginFile.writeText(
+            """
+            // ==ArenaAI==
+            // @id           my-plugin
+            // @name         My Plugin
+            // @version      1.0.0
+            // @type         plugin
+            // @minAppVersion 2.0.0
+            // @match        *://arena.ai/*
+            // @compatible   true
+            // ==/ArenaAI==
+            window.ArenaAI.registerPlugin({ id: 'my-plugin' });
+            """.trimIndent()
+        )
 
-    val bridge = ArenaFileBridge(context) { callback -> callback("content://sample/tree") }
+        val afterAdd = ArenaAddonManager.scanAllAddons(context, ArenaSettings())
+        assertEquals(1, afterAdd.size)
+        assertEquals("My Plugin", afterAdd.first().name)
+        assertEquals(AddonType.PLUGIN, afterAdd.first().type)
+        assertTrue(afterAdd.first().compatible)
+    }
 
-    assertTrue(bridge.writeFile("plugin/teste_fs.txt", "Conteudo ArenaFS"))
-    assertTrue(bridge.exists("plugin/teste_fs.txt"))
-    assertEquals("Conteudo ArenaFS", bridge.readFile("plugin/teste_fs.txt"))
+    @Test
+    fun `locale helper auto detects supported languages and defaults unknown locales to english`() {
+        assertEquals(12, AppLanguage.entries.size)
+        assertTrue(AppLanguage.entries.all { it.flag.isNotBlank() })
 
-    val listingJson = bridge.listFiles("plugin")
-    assertTrue(listingJson.contains("\"ok\":true"))
-    assertTrue(listingJson.contains("teste_fs.txt"))
+        assertEquals("en", ArenaLocaleHelper.resolveEffectiveLanguageCode("auto", Locale.ENGLISH))
+        assertEquals("zh-CN", ArenaLocaleHelper.resolveEffectiveLanguageCode("auto", Locale.SIMPLIFIED_CHINESE))
+        assertEquals("hi", ArenaLocaleHelper.resolveEffectiveLanguageCode("auto", Locale("hi")))
+        assertEquals("es", ArenaLocaleHelper.resolveEffectiveLanguageCode("auto", Locale("es", "ES")))
+        assertEquals("fr", ArenaLocaleHelper.resolveEffectiveLanguageCode("auto", Locale.FRENCH))
+        assertEquals("ar", ArenaLocaleHelper.resolveEffectiveLanguageCode("auto", Locale("ar")))
+        assertEquals("bn", ArenaLocaleHelper.resolveEffectiveLanguageCode("auto", Locale("bn")))
+        assertEquals("pt-BR", ArenaLocaleHelper.resolveEffectiveLanguageCode("auto", Locale("pt", "BR")))
+        assertEquals("pt-PT", ArenaLocaleHelper.resolveEffectiveLanguageCode("auto", Locale("pt", "PT")))
+        assertEquals("ru", ArenaLocaleHelper.resolveEffectiveLanguageCode("auto", Locale("ru")))
+        assertEquals("ur", ArenaLocaleHelper.resolveEffectiveLanguageCode("auto", Locale("ur")))
 
-    // Verify sandbox prevents escaping ArenaAI directory
-    assertFalse(bridge.writeFile("../../etc/passwd", "hack"))
-    assertEquals(null, bridge.readFile("/etc/hosts"))
-    val blockedList = bridge.listFiles("/etc")
-    assertTrue(blockedList.contains("\"ok\":false"))
+        // Unsupported device locale falls back to English
+        assertEquals("en", ArenaLocaleHelper.resolveEffectiveLanguageCode("auto", Locale.JAPANESE))
+        assertEquals("en", ArenaLocaleHelper.resolveEffectiveLanguageCode("auto", Locale.GERMAN))
 
-    assertTrue(bridge.deleteFile("plugin/teste_fs.txt"))
-    assertFalse(bridge.exists("plugin/teste_fs.txt"))
-  }
+        // Explicit choice overrides device locale
+        assertEquals("pt-BR", ArenaLocaleHelper.resolveEffectiveLanguageCode("pt-BR", Locale.JAPANESE))
+    }
 
-  @Test
-  fun `sdk injection exposes ArenaAI dom helpers and 1s settle debounce`() {
-    val sdk = ArenaAddonManager.buildSiteSdkAndAddonsScript(emptyList(), "")
-    assertTrue(sdk.contains("dom:"))
-    assertTrue(sdk.contains("click: function(el)"))
-    assertTrue(sdk.contains("waitFor: function(selector, timeout)"))
-    assertTrue(sdk.contains("PointerEvent"))
-    assertTrue(sdk.contains("TouchEvent"))
-    assertTrue(sdk.contains("MouseEvent"))
+    @Test
+    fun `notifications are completely suppressed when notifyOnFinish is disabled`() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        val shadowNm = Shadows.shadowOf(nm)
 
-    assertTrue(ArenaJsInterface.SCRIPT_INJECTION.contains("DOM_SETTLE_DEBOUNCE_MS = 1000"))
-    assertTrue(ArenaJsInterface.SCRIPT_INJECTION.contains("getChatContainer"))
-  }
+        ArenaSettingsRepository.saveSettings(context, ArenaSettings(notifyOnFinish = false))
+        assertFalse(NotificationHelper.isNotificationsAllowed(context))
+
+        NotificationHelper.showResponseNotification(context, "Should not display")
+        NotificationHelper.showScanningAddonsNotification(context)
+        NotificationHelper.showAddonsFoundNotification(context, 1, 1)
+
+        assertEquals(0, shadowNm.allNotifications.size)
+    }
+
+    @Test
+    fun `account helper detects auth urls and appends login hint`() {
+        assertTrue(ArenaAccountHelper.isLoginOrAuthUrl("https://accounts.google.com/o/oauth2/v2/auth"))
+        assertTrue(ArenaAccountHelper.isLoginOrAuthUrl("https://arena.ai/login"))
+        assertFalse(ArenaAccountHelper.isLoginOrAuthUrl("https://arena.ai/agent"))
+
+        val hinted = ArenaAccountHelper.appendLoginHintIfGoogleOAuth(
+            "https://accounts.google.com/o/oauth2/v2/auth?client_id=123",
+            "user@gmail.com"
+        )
+        assertTrue(hinted.contains("login_hint=user%40gmail.com"))
+    }
+
+    @Test
+    fun `file bridge ArenaFS reads writes lists and blocks sandbox escape`() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        ArenaSettingsRepository.ensureAddonWorkspaceInitialized(context)
+
+        val bridge = ArenaFileBridge(context) { callback -> callback("content://sample/tree") }
+
+        assertTrue(bridge.writeFile("plugins/test_fs.txt", "ArenaFS Content"))
+        assertTrue(bridge.exists("plugins/test_fs.txt"))
+        assertEquals("ArenaFS Content", bridge.readFile("plugins/test_fs.txt"))
+
+        val listingJson = bridge.listFiles("plugins")
+        assertTrue(listingJson.contains("\"ok\":true"))
+        assertTrue(listingJson.contains("test_fs.txt"))
+
+        // Verify sandbox prevents escaping ArenaAI directory
+        assertFalse(bridge.writeFile("../../etc/passwd", "hack"))
+        assertEquals(null, bridge.readFile("/etc/hosts"))
+        val blockedList = bridge.listFiles("/etc")
+        assertTrue(blockedList.contains("\"ok\":false"))
+
+        assertTrue(bridge.deleteFile("plugins/test_fs.txt"))
+        assertFalse(bridge.exists("plugins/test_fs.txt"))
+    }
+
+    @Test
+    fun `sdk injection exposes ArenaAI dom helpers language and exact composer button detection`() {
+        val sdk = ArenaAddonManager.buildSiteSdkAndAddonsScript(
+            addons = emptyList(),
+            connectedEmail = "",
+            languageCode = AppLanguage.PORTUGUESE_BR.code
+        )
+        assertTrue(sdk.contains("language: \"pt-BR\""))
+        assertTrue(sdk.contains("arena-ai-language"))
+        assertTrue(sdk.contains("dom:"))
+        assertTrue(sdk.contains("click: function(el)"))
+        assertTrue(sdk.contains("waitFor: function(selector, timeout)"))
+        assertTrue(sdk.contains("PointerEvent"))
+        assertTrue(sdk.contains("TouchEvent"))
+        assertTrue(sdk.contains("MouseEvent"))
+
+        assertTrue(ArenaJsInterface.SCRIPT_INJECTION.contains("DOM_SETTLE_DEBOUNCE_MS = 1000"))
+        assertTrue(ArenaJsInterface.SCRIPT_INJECTION.contains("getChatContainer"))
+        assertTrue(ArenaJsInterface.SCRIPT_INJECTION.contains("button[data-perf-target=\"send\"]"))
+        assertTrue(ArenaJsInterface.SCRIPT_INJECTION.contains("Stop generating"))
+        assertTrue(ArenaJsInterface.SCRIPT_INJECTION.contains("Send message"))
+        assertTrue(ArenaJsInterface.SCRIPT_INJECTION.contains("sawStopButton"))
+    }
 }
