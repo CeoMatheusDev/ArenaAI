@@ -152,7 +152,7 @@ A interface nativa registrada no WebView expõe os seguintes métodos síncronos
 Exemplo:
 
 ```javascript
-const result = JSON.parse(window.ArenaFS.listFiles("extencao"));
+const result = JSON.parse(window.ArenaFS.listFiles("extension"));
 
 if (result.ok) {
     console.log(result.entries);
