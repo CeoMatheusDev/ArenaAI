@@ -163,27 +163,50 @@
   }
 
   function renderModelPicker() {
-    var selected = modelById(state.selected[state.agent]);
     var box = el('div', { class: 'ma-modelbox' });
-    var top = el('div', { class: 'ma-modeltop' });
-    var select = el('select', { class: 'ma-select', 'aria-label': 'Modelo do agente' });
-    state.models.forEach(function (m) {
-      var opt = el('option', { value: m.id, text: (isFree(m) ? 'FREE · ' : '') + (m.name || m.id) + ' — ' + m.id });
-      if (m.id === state.selected[state.agent]) opt.selected = true;
-      select.appendChild(opt);
-    });
-    select.addEventListener('change', function () {
-      state.selected[state.agent] = select.value;
-      render();
-    });
-    var refresh = el('button', { class: 'ma-btn', text: '↻', title: 'Atualizar modelos', onclick: function () { loadModels().catch(function () {}); } });
-    top.appendChild(select); top.appendChild(refresh); box.appendChild(top);
-    var detail = el('details', {});
-    detail.open = false;
-    detail.appendChild(el('summary', { class: 'ma-modelrow', text: 'Detalhes completos do modelo  ▾' }));
-    var details = el('div', { html: modelDetails(selected) });
-    detail.appendChild(details);
-    box.appendChild(detail);
+    var current = modelById(state.selected[state.agent]);
+    var currentLabel = current ? (current.name || current.id) : 'Nenhum modelo selecionado';
+    box.appendChild(el('div', { class: 'ma-modeltop' }, [
+      el('div', { class: 'ma-modelname', text: currentLabel }),
+      el('span', { class: 'ma-pill', text: current && isFree(current) ? 'FREE' : 'MODELO' })
+    ]));
+    var search = el('input', { class: 'ma-input ma-search', type: 'search', placeholder: 'Filtrar por nome ou ID do modelo…' });
+    box.appendChild(search);
+    var list = el('div', { class: 'ma-model-list' });
+    box.appendChild(list);
+    function paint(filter) {
+      list.replaceChildren();
+      var q = safeText(filter).toLowerCase().trim();
+      var filtered = state.models.filter(function (m) {
+        return !q || safeText(m.id).toLowerCase().includes(q) || safeText(m.name).toLowerCase().includes(q);
+      }).slice(0, 100);
+      if (!filtered.length) {
+        list.appendChild(el('div', { class: 'ma-empty', text: 'Nenhum modelo encontrado.' }));
+        return;
+      }
+      filtered.forEach(function (m) {
+        var item = el('div', { class: 'ma-modelitem' });
+        var row = el('button', { class: 'ma-modelrow' + (m.id === state.selected[state.agent] ? ' selected' : '') });
+        var label = el('div', { class: 'ma-modelname' });
+        label.appendChild(el('b', { text: m.name || m.id }));
+        label.appendChild(el('small', { text: m.id }));
+        row.appendChild(label);
+        row.appendChild(el('span', { class: isFree(m) ? 'ma-free' : 'ma-paid', text: isFree(m) ? 'FREE' : 'PAGO' }));
+        row.addEventListener('click', function () {
+          state.selected[state.agent] = m.id;
+          render();
+          setStatus('Modelo selecionado: ' + m.id, 'ok');
+        });
+        item.appendChild(row);
+        var details = el('details', { class: 'ma-modeldetails' });
+        details.appendChild(el('summary', { class: 'ma-chevron', text: '⌄' }));
+        details.appendChild(el('div', { html: modelDetails(m) }));
+        item.appendChild(details);
+        list.appendChild(item);
+      });
+    }
+    search.addEventListener('input', function () { paint(search.value); });
+    paint('');
     return box;
   }
 
