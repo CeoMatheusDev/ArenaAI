@@ -134,8 +134,8 @@ fun AboutArenaDialog(
                     AboutInfoRow(label = stringResource(R.string.about_connected_account), value = connectedEmail)
                 }
                 AboutInfoRow(label = stringResource(R.string.about_json_config), value = "ArenaAI/settings.json")
-                AboutInfoRow(label = stringResource(R.string.about_documentation), value = "ArenaAI/documentation.md")
-                AboutInfoRow(label = stringResource(R.string.about_addons), value = "ArenaAI/extensions & plugins")
+                AboutInfoRow(label = stringResource(R.string.about_documentation), value = "ArenaAI/document.md")
+                AboutInfoRow(label = stringResource(R.string.about_addons), value = "ArenaAI/extension & plugin")
             }
         },
         confirmButton = {
@@ -177,7 +177,6 @@ private fun AboutInfoRow(label: String, value: String) {
 @Composable
 fun AppSettingsDialog(
     settings: ArenaSettings,
-    storageSummary: String,
     onUpdateSettings: (ArenaSettings) -> Unit,
     onTestNotification: () -> Unit,
     onAuthorizeSafFolder: () -> Unit,
@@ -404,19 +403,6 @@ fun AppSettingsDialog(
                     checked = settings.autoScanAddonsOnStartup,
                     onCheckedChange = { onUpdateSettings(settings.copy(autoScanAddonsOnStartup = it)) }
                 )
-
-                Surface(
-                    shape = RoundedCornerShape(12.dp),
-                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text(
-                        text = storageSummary,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(10.dp)
-                    )
-                }
 
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -910,11 +896,6 @@ fun ExtensionSettingsDialog(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                             Spacer(modifier = Modifier.height(8.dp))
-                            Text(
-                                text = storageSummary,
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
                         }
                     }
                 } else {
