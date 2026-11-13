@@ -89,7 +89,7 @@
     var n = Number(value);
     if (!Number.isFinite(n)) return 'n/d';
     if (n === 0) return 'grátis';
-    return '$' + n.toFixed(n < 0.001 ? 8 : 6).replace(/0+$/, '').replace(/\\.$/, '');
+    return '$' + n.toFixed(n < 0.001 ? 8 : 6).replace(/0+$/, '').replace(/\.$/, '');
   }
   function isFree(m) {
     var p = m && m.pricing || {};
@@ -288,25 +288,26 @@
     if (state.busy || !text.trim()) return;
     if (!state.apiKey) { setStatus('Configure sua chave OpenRouter primeiro.', 'error'); return; }
     state.busy = true;
+    var agentId = state.agent;
     var input = text.trim();
     addMessage('user', input);
     var output = '';
-    state.messages[state.agent].push({ role: 'assistant', content: '' });
+    state.messages[agentId].push({ role: 'assistant', content: '' });
     render();
-    var history = state.messages[state.agent].slice(0, -1).map(function (m) { return { role: m.role, content: m.content }; });
-    var messages = [{ role: 'system', content: AGENTS[state.agent].system }].concat(history);
-    var bubbleIndex = state.messages[state.agent].length - 1;
-    setStatus('Agente ' + AGENTS[state.agent].label + ' trabalhando…');
+    var history = state.messages[agentId].slice(0, -1).map(function (m) { return { role: m.role, content: m.content }; });
+    var messages = [{ role: 'system', content: AGENTS[agentId].system }].concat(history);
+    var bubbleIndex = state.messages[agentId].length - 1;
+    setStatus('Agente ' + AGENTS[agentId].label + ' trabalhando…');
     streamCompletion(messages, function (token) {
       output += token;
-      state.messages[state.agent][bubbleIndex].content = output;
+      state.messages[agentId][bubbleIndex].content = output;
       renderMessages();
     }).then(function () {
-      state.lastPlan = state.agent === 'build' ? output : state.lastPlan;
+      state.lastPlan = agentId === 'build' ? output : state.lastPlan;
       setStatus('Resposta concluída.', 'ok');
     }).catch(function (e) {
       if (e.name !== 'AbortError') setStatus(e.message || 'Erro na geração.', 'error');
-      state.messages[state.agent][bubbleIndex].content = output || '[Geração interrompida ou sem conteúdo.]';
+      state.messages[agentId][bubbleIndex].content = output || '[Geração interrompida ou sem conteúdo.]';
       renderMessages();
     }).finally(function () {
       state.busy = false; state.aborter = null; renderControls();
