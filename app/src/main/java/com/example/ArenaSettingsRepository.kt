@@ -788,7 +788,7 @@ Save a `.js` file directly inside `ArenaAI/extension/` or `ArenaAI/plugin/`:
 The app exposes `window.ArenaFS` (`addJavascriptInterface(..., "ArenaFS")`) in WebView so scripts can safely read and write files inside the `ArenaAI/` sandbox and SAF-authorized folders:
 
 - `ArenaFS.getArenaDir()` -> Returns the root `ArenaAI` directory path.
-- `ArenaFS.listFiles(path)` -> Returns JSON `{ ok, path, entries: [{ name, path, isDirectory, size, lastModified }] }`. Use `"."`, `"extensions"`, `"plugins"`, or a `content://` URI.
+- `ArenaFS.listFiles(path)` -> Returns JSON `{ ok, path, entries: [{ name, path, isDirectory, size, lastModified }] }`. Use `"."`, `"extension"`, `"plugin"`, or a `content://` URI.
 - `ArenaFS.readFile(path)` -> Reads and returns UTF-8 file contents (or `null` if missing).
 - `ArenaFS.writeFile(path, content)` -> Writes `content` to the file (`true`/`false`).
 - `ArenaFS.exists(path)` / `ArenaFS.mkdir(path)` / `ArenaFS.deleteFile(path)` -> Check existence, create directories, and safely delete files.
@@ -796,7 +796,7 @@ The app exposes `window.ArenaFS` (`addJavascriptInterface(..., "ArenaFS")`) in W
 
 ```javascript
 // Example using ArenaFS inside an extension or plugin
-const list = JSON.parse(window.ArenaFS.listFiles("extensions"));
+const list = JSON.parse(window.ArenaFS.listFiles("extension"));
 window.ArenaFS.writeFile("plugin/notes.txt", "Saved by plugin!");
 const config = window.ArenaFS.readFile("settings.json");
 ```
