@@ -28,6 +28,7 @@ import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.Extension
 import androidx.compose.material.icons.filled.FolderOpen
+import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
@@ -165,6 +166,7 @@ fun AppSettingsDialog(
     settings: ArenaSettings,
     storageSummary: String,
     onUpdateSettings: (ArenaSettings) -> Unit,
+    onTestNotification: () -> Unit,
     onAuthorizeSafFolder: () -> Unit,
     onOpenGuide: () -> Unit,
     onDismiss: () -> Unit
@@ -213,6 +215,20 @@ fun AppSettingsDialog(
                     checked = settings.notifyOnFinish,
                     onCheckedChange = { onUpdateSettings(settings.copy(notifyOnFinish = it)) }
                 )
+                FilledTonalButton(
+                    onClick = onTestNotification,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("settings_test_notification_button")
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Notifications,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(stringResource(R.string.action_test_notification))
+                }
                 SettingToggleRow(
                     title = "Execução em Segundo Plano",
                     subtitle = "Mantém o app ativo se minimizado ao gerar saída",

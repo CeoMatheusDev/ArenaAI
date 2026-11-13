@@ -55,7 +55,6 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.AccountCircle
-import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.Extension
@@ -65,8 +64,6 @@ import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Notifications
-import androidx.compose.material.icons.filled.NotificationsActive
-import androidx.compose.material.icons.filled.NotificationsOff
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Share
@@ -533,30 +530,6 @@ fun ArenaAppScreen(
                         actions = {
                             IconButton(
                                 onClick = {
-                                    if (!hasNotificationPermission && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                                        notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-                                    } else {
-                                        val next = !currentSettings.notifyOnFinish
-                                        persistSettings(currentSettings.copy(notifyOnFinish = next))
-                                        val msg = if (next) {
-                                            "Notificações ativadas!"
-                                        } else {
-                                            "Notificações desativadas"
-                                        }
-                                        Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
-                                    }
-                                },
-                                modifier = Modifier.testTag("notification_toggle_button")
-                            ) {
-                                Icon(
-                                    imageVector = if (webViewState.notifyOnFinish) Icons.Default.NotificationsActive else Icons.Default.NotificationsOff,
-                                    contentDescription = stringResource(R.string.notify_on_complete),
-                                    tint = if (webViewState.notifyOnFinish) ArenaPrimary else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
-                                )
-                            }
-
-                            IconButton(
-                                onClick = {
                                     webViewState.hasError = false
                                     webViewRef?.reload()
                                 },
@@ -643,7 +616,7 @@ fun ArenaAppScreen(
                                 DropdownMenuItem(
                                     text = {
                                         Column {
-                                            Text(stringResource(R.string.action_extensions_config))
+                                            Text(stringResource(R.string.action_extensions))
                                             val compatCount = webViewState.addons.count { it.compatible }
                                             if (compatCount > 0) {
                                                 Text(
@@ -684,37 +657,6 @@ fun ArenaAppScreen(
                                     }
                                 )
                                 DropdownMenuItem(
-                                    text = {
-                                        Column {
-                                            Text(stringResource(R.string.action_toggle_background))
-                                            Text(
-                                                text = if (webViewState.backgroundServiceEnabled) "Ativo" else "Desativado",
-                                                style = MaterialTheme.typography.bodySmall,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                                            )
-                                        }
-                                    },
-                                    leadingIcon = {
-                                        Icon(
-                                            Icons.Default.Bolt,
-                                            contentDescription = null,
-                                            tint = if (webViewState.backgroundServiceEnabled) ArenaPrimary else MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                    },
-                                    onClick = {
-                                        showMenu = false
-                                        val nextBg = !currentSettings.backgroundServiceEnabled
-                                        persistSettings(currentSettings.copy(backgroundServiceEnabled = nextBg))
-                                        if (nextBg) {
-                                            NotificationHelper.startBackgroundService(context)
-                                            Toast.makeText(context, "Segundo plano ativado!", Toast.LENGTH_SHORT).show()
-                                        } else {
-                                            NotificationHelper.stopBackgroundService(context)
-                                            Toast.makeText(context, "Segundo plano desativado", Toast.LENGTH_SHORT).show()
-                                        }
-                                    }
-                                )
-                                DropdownMenuItem(
                                     text = { Text("Página Inicial") },
                                     leadingIcon = {
                                         Icon(Icons.Default.Home, contentDescription = null)
@@ -723,24 +665,6 @@ fun ArenaAppScreen(
                                         showMenu = false
                                         webViewState.hasError = false
                                         webViewRef?.loadUrl(ARENA_HOME_URL)
-                                    }
-                                )
-                                DropdownMenuItem(
-                                    text = { Text(stringResource(R.string.action_test_notification)) },
-                                    leadingIcon = {
-                                        Icon(Icons.Default.Notifications, contentDescription = null)
-                                    },
-                                    onClick = {
-                                        showMenu = false
-                                        if (!hasNotificationPermission && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                                            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-                                        } else {
-                                            NotificationHelper.showResponseNotification(
-                                                context,
-                                                "Teste: O Arena AI notificará você no telefone assim que uma resposta terminar!"
-                                            )
-                                            Toast.makeText(context, "Notificação de teste enviada!", Toast.LENGTH_SHORT).show()
-                                        }
                                     }
                                 )
                                 DropdownMenuItem(
@@ -982,6 +906,17 @@ fun ArenaAppScreen(
                     NotificationHelper.startBackgroundService(context)
                 } else if (!webViewState.isGenerating) {
                     NotificationHelper.stopBackgroundService(context)
+                }
+            },
+            onTestNotification = {
+                if (!hasNotificationPermission && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                } else {
+                    NotificationHelper.showResponseNotification(
+                        context,
+                        "Teste: O Arena AI notificará você no telefone assim que uma resposta terminar!"
+                    )
+                    Toast.makeText(context, "Notificação de teste enviada!", Toast.LENGTH_SHORT).show()
                 }
             },
             onAuthorizeSafFolder = {

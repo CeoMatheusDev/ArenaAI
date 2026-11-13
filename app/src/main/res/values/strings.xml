@@ -26,6 +26,7 @@
     <string name="response_completed_default_body">O Arena AI terminou de gerar sua resposta. Toque para visualizar.</string>
     <string name="action_test_notification">Testar Notificação</string>
     <string name="action_toggle_background">Execução em Segundo Plano</string>
+    <string name="action_extensions">Extensão</string>
     <string name="action_extensions_config">Configuração de Extensão</string>
     <string name="action_about">Sobre</string>
     <string name="action_connect_account">Conectar Conta do Celular</string>
