@@ -9,7 +9,7 @@
     models: [],
     selected: { build: '', dialogue: '', chat: '' },
     agent: 'build',
-    messages: [],
+    messages: { build: [], dialogue: [], chat: [] },
     busy: false,
     aborter: null,
     lastPlan: '',
@@ -63,7 +63,7 @@
   var styleLink = document.createElement('link');
   styleLink.rel = 'stylesheet';
   styleLink.href = '';
-  var css = "";
+  var css = ":host { all: initial; }\n#ma-root, #ma-root * { box-sizing: border-box; }\n#ma-root {\n  --ma-bg: #101216; --ma-panel: #191d24; --ma-panel2: #222832;\n  --ma-line: #303743; --ma-text: #edf1f7; --ma-muted: #9aa5b4;\n  --ma-accent: #8b7cff; --ma-accent2: #6d5ce7; --ma-green: #62d6a3;\n  --ma-yellow: #f0c674; --ma-red: #ff8585;\n  color: var(--ma-text); font: 13px/1.45 Inter, system-ui, sans-serif;\n}\n#ma-launch {\n  position: fixed; right: 18px; bottom: 92px; z-index: 2147483000;\n  width: 54px; height: 54px; border: 1px solid #a99fff66; border-radius: 18px;\n  background: linear-gradient(145deg,#8c7dff,#5545c9); color: white;\n  box-shadow: 0 8px 28px #0008; font-weight: 800; font-size: 14px; cursor: pointer;\n}\n#ma-panel {\n  position: fixed; z-index: 2147483000; right: 18px; bottom: 156px;\n  width: min(440px, calc(100vw - 28px)); height: min(720px, calc(100dvh - 190px));\n  display: none; flex-direction: column; overflow: hidden; border-radius: 18px;\n  border: 1px solid #ffffff20; background: var(--ma-bg); box-shadow: 0 18px 70px #000b;\n}\n#ma-panel.open { display: flex; }\n.ma-head { display:flex; align-items:center; justify-content:space-between; padding:14px 16px; border-bottom:1px solid var(--ma-line); background:#171a20; }\n.ma-brand { display:flex; align-items:center; gap:10px; font-weight:800; font-size:15px; letter-spacing:.2px; }\n.ma-mark { display:grid; place-items:center; width:30px;height:30px;border-radius:10px;background:#7666ed;color:white;font-weight:900; }\n.ma-sub { color:var(--ma-muted);font-size:10px;font-weight:500; }\n.ma-iconbtn,.ma-btn { border:1px solid var(--ma-line); background:var(--ma-panel2); color:var(--ma-text); border-radius:9px; padding:7px 10px; cursor:pointer; }\n.ma-iconbtn { font-size:18px; padding:3px 9px; }\n.ma-body { display:flex; flex-direction:column; min-height:0; flex:1; }\n.ma-tabs { display:grid;grid-template-columns:repeat(3,1fr);gap:6px;padding:10px;border-bottom:1px solid var(--ma-line); }\n.ma-tab { border:1px solid transparent;background:transparent;color:var(--ma-muted);border-radius:9px;padding:9px 4px;font-weight:700;cursor:pointer; }\n.ma-tab.active { color:white;background:#7666ed22;border-color:#7666ed88; }\n.ma-config { padding:10px 12px;display:flex;gap:7px;align-items:center;border-bottom:1px solid var(--ma-line); }\n.ma-config input { min-width:0;flex:1; }\n.ma-input,.ma-select,.ma-textarea { width:100%; border:1px solid var(--ma-line);border-radius:9px;background:#11151a;color:var(--ma-text);padding:10px;font:inherit;outline:none; }\n.ma-input:focus,.ma-select:focus,.ma-textarea:focus { border-color:var(--ma-accent); }\n.ma-section { padding:12px;display:flex;flex-direction:column;gap:9px;min-height:0;overflow:auto; }\n.ma-label { color:var(--ma-muted);font-size:10px;text-transform:uppercase;letter-spacing:.09em;font-weight:800; }\n.ma-modelbox { border:1px solid var(--ma-line);border-radius:11px;overflow:hidden;background:var(--ma-panel); }\n.ma-modeltop { display:flex;align-items:center;gap:8px;padding:10px;cursor:pointer; }\n.ma-modeltop select { flex:1;min-width:0; }\n.ma-modelrow { display:flex;align-items:center;gap:8px;padding:9px 10px;border-top:1px solid #ffffff0d;cursor:pointer; }\n.ma-modelrow:hover,.ma-modelrow.selected { background:#7666ed1b; }\n.ma-modelname { flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:650; }\n.ma-free { color:#8de0b6;background:#173d30;border-radius:5px;padding:2px 5px;font-size:9px;font-weight:900; }\n.ma-paid { color:#c0b7ff;background:#2a2550;border-radius:5px;padding:2px 5px;font-size:9px;font-weight:800; }\n.ma-chevron { color:var(--ma-muted);font-size:15px; }\n.ma-details { padding:10px;border-top:1px solid var(--ma-line);display:grid;grid-template-columns:1fr 1fr;gap:8px;background:#12161c; }\n.ma-detail { min-width:0; }\n.ma-detail b { display:block;font-size:11px;overflow-wrap:anywhere; }\n.ma-detail span { color:var(--ma-muted);font-size:10px; }\n.ma-search { margin:0 10px 10px; width:calc(100% - 20px); }\n.ma-model-list { max-height:210px;overflow:auto;border-top:1px solid var(--ma-line); }\n.ma-actions { display:flex;gap:7px;flex-wrap:wrap; }\n.ma-btn.primary { background:var(--ma-accent2);border-color:var(--ma-accent);color:white;font-weight:750; }\n.ma-btn:disabled { opacity:.45;cursor:not-allowed; }\n.ma-status { color:var(--ma-muted);font-size:11px;min-height:16px; }\n.ma-status.error { color:var(--ma-red); }\n.ma-status.ok { color:var(--ma-green); }\n.ma-chat { display:flex;flex-direction:column;gap:9px;min-height:190px;flex:1; }\n.ma-messages { display:flex;flex-direction:column;gap:9px;overflow:auto;min-height:100px;flex:1;padding:2px; }\n.ma-msg { border:1px solid var(--ma-line);background:var(--ma-panel);border-radius:12px;padding:10px;white-space:pre-wrap;overflow-wrap:anywhere; }\n.ma-msg.user { border-color:#7666ed66;background:#292544; }\n.ma-msg .meta { color:var(--ma-muted);font-size:10px;margin-bottom:5px;font-weight:800; }\n.ma-textarea { resize:vertical;min-height:76px;max-height:180px; }\n.ma-row { display:flex;gap:7px;align-items:center; }\n.ma-row > * { min-width:0; }\n.ma-check { display:flex;align-items:center;gap:6px;color:var(--ma-muted);font-size:11px; }\n.ma-note { color:var(--ma-muted);font-size:10px;line-height:1.5; }\n.ma-divider { height:1px;background:var(--ma-line);margin:2px 0; }\n.ma-pill { border:1px solid var(--ma-line);border-radius:99px;padding:3px 7px;color:var(--ma-muted);font-size:10px; }\n.ma-empty { color:var(--ma-muted);text-align:center;padding:22px 10px; }\n@media(max-width:520px) {\n #ma-launch { right:12px;bottom:78px; }\n #ma-panel { right:8px;bottom:140px;width:calc(100vw - 16px);height:min(700px,calc(100dvh - 160px)); }\n}\n";
   // CSS file is loaded by the add-on manager through the SDK; this fallback keeps the UI usable
   // if a host build does not inject manifest styles.
   var style = document.createElement('style');
@@ -188,19 +188,21 @@
   }
 
   function addMessage(role, content) {
-    state.messages.push({ role: role, content: content });
-    if (state.messages.length > 40) state.messages.splice(0, state.messages.length - 40);
+    var list = state.messages[state.agent];
+    list.push({ role: role, content: content });
+    if (list.length > 40) list.splice(0, list.length - 40);
     renderMessages();
   }
   function renderMessages() {
     var list = shadow.getElementById('ma-messages');
     if (!list) return;
     list.replaceChildren();
-    if (!state.messages.length) {
+    var messages = state.messages[state.agent];
+    if (!messages.length) {
       list.appendChild(el('div', { class: 'ma-empty', text: 'Escolha um agente e envie sua primeira mensagem.' }));
       return;
     }
-    state.messages.forEach(function (m) {
+    messages.forEach(function (m) {
       var node = el('div', { class: 'ma-msg ' + (m.role === 'user' ? 'user' : '') });
       node.appendChild(el('div', { class: 'meta', text: m.role === 'user' ? 'VOCÊ' : 'MODELAGENT' }));
       node.appendChild(document.createTextNode(m.content));
@@ -260,22 +262,22 @@
     var input = text.trim();
     addMessage('user', input);
     var output = '';
-    state.messages.push({ role: 'assistant', content: '' });
+    state.messages[state.agent].push({ role: 'assistant', content: '' });
     render();
-    var history = state.messages.slice(0, -1).map(function (m) { return { role: m.role, content: m.content }; });
+    var history = state.messages[state.agent].slice(0, -1).map(function (m) { return { role: m.role, content: m.content }; });
     var messages = [{ role: 'system', content: AGENTS[state.agent].system }].concat(history);
-    var bubbleIndex = state.messages.length - 1;
+    var bubbleIndex = state.messages[state.agent].length - 1;
     setStatus('Agente ' + AGENTS[state.agent].label + ' trabalhando…');
     streamCompletion(messages, function (token) {
       output += token;
-      state.messages[bubbleIndex].content = output;
+      state.messages[state.agent][bubbleIndex].content = output;
       renderMessages();
     }).then(function () {
       state.lastPlan = state.agent === 'build' ? output : state.lastPlan;
       setStatus('Resposta concluída.', 'ok');
     }).catch(function (e) {
       if (e.name !== 'AbortError') setStatus(e.message || 'Erro na geração.', 'error');
-      state.messages[bubbleIndex].content = output || '[Geração interrompida ou sem conteúdo.]';
+      state.messages[state.agent][bubbleIndex].content = output || '[Geração interrompida ou sem conteúdo.]';
       renderMessages();
     }).finally(function () {
       state.busy = false; state.aborter = null; renderControls();
@@ -385,7 +387,7 @@
     actions.appendChild(el('button', { class: 'ma-btn', text: 'Parar', onclick: function () { if (state.aborter) state.aborter.abort(); } }));
     if (state.agent === 'build') {
       actions.appendChild(el('button', { class: 'ma-btn', text: 'Inserir na Arena', onclick: function () {
-        var plan = state.lastPlan || (state.messages.length ? state.messages[state.messages.length - 1].content : '');
+        var plan = state.lastPlan || (state.messages.build.length ? state.messages.build[state.messages.build.length - 1].content : '');
         if (!plan.trim()) { setStatus('Gere um plano antes de inserir.', 'error'); return; }
         try { insertIntoArena(plan); setStatus('Plano inserido no composer. Revise antes de enviar.', 'ok'); }
         catch (e) { setStatus(e.message, 'error'); }
