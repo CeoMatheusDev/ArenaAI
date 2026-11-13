@@ -1,0 +1,6 @@
+{
+  "name": "Arena AI",
+  "description": "Arena AI native Android web app for arena.ai/agent with device email login, extension & plugin ecosystem, persistent ArenaIA/Settings.json, background execution, wake lock, and completion notifications.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
