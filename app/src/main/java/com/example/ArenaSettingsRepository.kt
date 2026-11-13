@@ -652,10 +652,14 @@ Salve um arquivo `.js` diretamente em `ArenaAI/extencao/` ou `ArenaAI/plugin/`:
 - `window.ArenaAI.notify(titulo, mensagem)` → Envia uma notificação nativa no telefone.
 - `window.ArenaAI.ui.injectCSS(css)` → Injeta CSS personalizado no site.
 - `window.ArenaAI.storage.get(chave)` / `set(chave, valor)` → Armazena dados locais do complemento.
-- `window.ArenaAI.onResponseComplete(fn)` → Dispara quando o modelo termina de responder.
+- `window.ArenaAI.onResponseComplete(fn)` → Dispara quando o modelo termina de responder e o DOM do chat estabiliza por 1 segundo.
 - `window.ArenaAI.onPromptSubmit(fn)` → Dispara quando um prompt é enviado.
+- `window.ArenaAI.dom.click(el)` → Dispara sequência completa (`PointerEvent`, `TouchEvent`, `MouseEvent` e `.click()`) compatível com React/Tailwind/Radix no WebView.
+- `window.ArenaAI.dom.waitFor(selector, timeout)` → Retorna uma `Promise` aguardando o elemento aparecer no DOM (padrão: `10000ms`).
+- `window.ArenaAI.dom.cleanText(el)` → Extrai texto limpo ignorando `<svg>`, `<style>` e `<script>`.
 - `window.ArenaAI.registerExtension(cfg)` / `registerPlugin(cfg)` → Registra o complemento na sessão.
 - `window.ArenaAI.fs` → Referência direta à ponte nativa `window.ArenaFS`.
+- **Depuração WebView**: `WebView.setWebContentsDebuggingEnabled(true)` está ativo; conecte via USB e acesse `chrome://inspect` no PC.
 
 ---
 

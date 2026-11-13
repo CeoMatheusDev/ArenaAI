@@ -61,8 +61,21 @@ class ArenaJsInterface(
     var settleTimer = null;
     var checkInterval = null;
     var lastLoginPromptAt = 0;
+    var lastChatMutationAt = Date.now();
+    var DOM_SETTLE_DEBOUNCE_MS = 1000;
 
-    function detectGeneratingState() {
+    function isAddonElement(node) {
+        if (!node) return false;
+        var el = node.nodeType === 1 ? node : node.parentElement;
+        if (!el || !el.closest) return false;
+        return !!(el.closest('#autoqueue-panel') || el.closest('[data-arena-addon]') || el.closest('[data-arena-ui]'));
+    }
+
+    function getChatContainer() {
+        return document.querySelector('main, [role="main"], [class*="chat" i], [class*="conversation" i], [class*="messages" i]') || document.body;
+    }
+
+    function isStillActive() {
         var stopBtn = document.querySelector(
             'button[aria-label*="stop" i], ' +
             'button[aria-label*="parar" i], ' +
@@ -85,37 +98,63 @@ class ArenaJsInterface(
         var submitBtn = document.querySelector('button[type="submit"], button[aria-label*="send" i], button[aria-label*="enviar" i]');
         var submitDisabledWithSpinner = submitBtn && submitBtn.disabled && (submitBtn.querySelector('svg.animate-spin') || submitBtn.querySelector('.spinner'));
 
-        var activeNow = !!(stopBtn || streamingIndicator || submitDisabledWithSpinner || (thinkingElement && thinkingElement.textContent.trim().length > 0));
+        return !!(stopBtn || streamingIndicator || submitDisabledWithSpinner || (thinkingElement && thinkingElement.textContent.trim().length > 0));
+    }
+
+    function scheduleSettleCheck() {
+        if (settleTimer) {
+            clearTimeout(settleTimer);
+            settleTimer = null;
+        }
+        var elapsedSinceMutation = Date.now() - lastChatMutationAt;
+        var waitMs = Math.max(DOM_SETTLE_DEBOUNCE_MS - elapsedSinceMutation, DOM_SETTLE_DEBOUNCE_MS);
+        settleTimer = setTimeout(function() {
+            settleTimer = null;
+            if (!isGenerating) return;
+            if (isStillActive()) {
+                return;
+            }
+            var quietFor = Date.now() - lastChatMutationAt;
+            if (quietFor < DOM_SETTLE_DEBOUNCE_MS) {
+                // DOM mutated recently (e.g. React still rendering modal buttons); wait until 1s of full stillness
+                scheduleSettleCheck();
+                return;
+            }
+
+            isGenerating = false;
+
+            var assistantBlocks = document.querySelectorAll(
+                '[data-message-author-role="assistant"], .prose, .markdown, .agent-response, [class*="assistant"], [class*="agent-message"]'
+            );
+            var latestText = "";
+            if (assistantBlocks.length > 0) {
+                latestText = assistantBlocks[assistantBlocks.length - 1].innerText || "";
+            }
+
+            if (window.ArenaAI && window.ArenaAI._emitResponseComplete) {
+                window.ArenaAI._emitResponseComplete(latestText);
+            }
+            if (window.AndroidBridge) {
+                window.AndroidBridge.onGenerationFinished(latestText.substring(0, 300));
+            }
+        }, waitMs);
+    }
+
+    function detectGeneratingState() {
+        var activeNow = isStillActive();
 
         if (activeNow && !isGenerating) {
             isGenerating = true;
+            if (settleTimer) {
+                clearTimeout(settleTimer);
+                settleTimer = null;
+            }
             if (window.AndroidBridge) {
                 window.AndroidBridge.onGenerationStarted();
             }
         } else if (!activeNow && isGenerating) {
             if (!settleTimer) {
-                settleTimer = setTimeout(function() {
-                    settleTimer = null;
-                    var recheck = document.querySelector('button[aria-label*="stop" i], button[aria-label*="parar" i], button[title*="stop" i]');
-                    if (!recheck && isGenerating) {
-                        isGenerating = false;
-
-                        var assistantBlocks = document.querySelectorAll(
-                            '[data-message-author-role="assistant"], .prose, .markdown, .agent-response, [class*="assistant"], [class*="agent-message"]'
-                        );
-                        var latestText = "";
-                        if (assistantBlocks.length > 0) {
-                            latestText = assistantBlocks[assistantBlocks.length - 1].innerText || "";
-                        }
-
-                        if (window.ArenaAI && window.ArenaAI._emitResponseComplete) {
-                            window.ArenaAI._emitResponseComplete(latestText);
-                        }
-                        if (window.AndroidBridge) {
-                            window.AndroidBridge.onGenerationFinished(latestText.substring(0, 300));
-                        }
-                    }
-                }, 1500);
+                scheduleSettleCheck();
             }
         } else if (activeNow && settleTimer) {
             clearTimeout(settleTimer);
@@ -152,7 +191,7 @@ class ArenaJsInterface(
             }
         }
 
-        if (el && (el.closest('button[type="submit"]') || el.closest('button[aria-label*="send" i]') || el.closest('button[aria-label*="enviar" i]') || el.closest('button:has(svg)'))) {
+        if (el && !isAddonElement(el) && (el.closest('button[type="submit"]') || el.closest('button[aria-label*="send" i]') || el.closest('button[aria-label*="enviar" i]') || el.closest('button:has(svg)'))) {
             var textarea = document.querySelector('textarea');
             if (textarea && textarea.value && window.ArenaAI && window.ArenaAI._emitPromptSubmit) {
                 window.ArenaAI._emitPromptSubmit(textarea.value);
@@ -162,7 +201,7 @@ class ArenaJsInterface(
     }, true);
 
     document.addEventListener('keydown', function(e) {
-        if (e.key === 'Enter' && !e.shiftKey) {
+        if (e.key === 'Enter' && !e.shiftKey && !isAddonElement(e.target)) {
             var textarea = document.querySelector('textarea');
             if (textarea && textarea.value && window.ArenaAI && window.ArenaAI._emitPromptSubmit) {
                 window.ArenaAI._emitPromptSubmit(textarea.value);
@@ -171,19 +210,38 @@ class ArenaJsInterface(
         }
     }, true);
 
-    var observer = new MutationObserver(function() {
-        detectGeneratingState();
+    var observer = new MutationObserver(function(mutations) {
+        var hasChatMutation = false;
+        for (var i = 0; i < mutations.length; i++) {
+            if (!isAddonElement(mutations[i].target)) {
+                hasChatMutation = true;
+                break;
+            }
+        }
+        if (hasChatMutation) {
+            lastChatMutationAt = Date.now();
+            if (isGenerating && settleTimer) {
+                // Reset 1s debounce whenever React updates the chat DOM
+                scheduleSettleCheck();
+            }
+            detectGeneratingState();
+        }
     });
 
-    if (document.body) {
-        observer.observe(document.body, { childList: true, subtree: true, characterData: true, attributes: true });
-    } else {
-        document.addEventListener('DOMContentLoaded', function() {
-            observer.observe(document.body, { childList: true, subtree: true, characterData: true, attributes: true });
-        });
+    function attachObserver() {
+        var container = getChatContainer();
+        if (container) {
+            observer.observe(container, { childList: true, subtree: true, characterData: true, attributes: true });
+        }
     }
 
-    checkInterval = setInterval(detectGeneratingState, 1000);
+    if (document.body) {
+        attachObserver();
+    } else {
+        document.addEventListener('DOMContentLoaded', attachObserver);
+    }
+
+    checkInterval = setInterval(detectGeneratingState, 800);
 })();
         """
     }

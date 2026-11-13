@@ -137,4 +137,18 @@ class ExampleRobolectricTest {
     assertTrue(bridge.deleteFile("plugin/teste_fs.txt"))
     assertFalse(bridge.exists("plugin/teste_fs.txt"))
   }
+
+  @Test
+  fun `sdk injection exposes ArenaAI dom helpers and 1s settle debounce`() {
+    val sdk = ArenaAddonManager.buildSiteSdkAndAddonsScript(emptyList(), "")
+    assertTrue(sdk.contains("dom:"))
+    assertTrue(sdk.contains("click: function(el)"))
+    assertTrue(sdk.contains("waitFor: function(selector, timeout)"))
+    assertTrue(sdk.contains("PointerEvent"))
+    assertTrue(sdk.contains("TouchEvent"))
+    assertTrue(sdk.contains("MouseEvent"))
+
+    assertTrue(ArenaJsInterface.SCRIPT_INJECTION.contains("DOM_SETTLE_DEBOUNCE_MS = 1000"))
+    assertTrue(ArenaJsInterface.SCRIPT_INJECTION.contains("getChatContainer"))
+  }
 }

@@ -572,6 +572,165 @@ object ArenaAddonManager {
                     } catch (e) {}
                 }
             },
+            dom: {
+                cleanText: function(el) {
+                    if (!el) return '';
+                    try {
+                        var clone = el.cloneNode(true);
+                        var ignored = clone.querySelectorAll('svg, style, script');
+                        for (var i = 0; i < ignored.length; i++) {
+                            if (ignored[i].parentNode) ignored[i].parentNode.removeChild(ignored[i]);
+                        }
+                        return (clone.textContent || clone.innerText || '').replace(/[\s\u00A0]+/g, ' ').trim();
+                    } catch (e) {
+                        return (el.innerText || el.textContent || '').replace(/[\s\u00A0]+/g, ' ').trim();
+                    }
+                },
+                click: function(el) {
+                    if (!el) return false;
+                    try {
+                        if (typeof el.scrollIntoView === 'function') {
+                            el.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' });
+                        }
+                    } catch (e) {}
+                    try {
+                        if (typeof el.focus === 'function') el.focus({ preventScroll: true });
+                    } catch (e) {
+                        try { el.focus(); } catch (e2) {}
+                    }
+
+                    var rect = el.getBoundingClientRect ? el.getBoundingClientRect() : { left: 0, top: 0, width: 0, height: 0 };
+                    var cx = Math.round(rect.left + (rect.width / 2));
+                    var cy = Math.round(rect.top + (rect.height / 2));
+
+                    var commonOpts = {
+                        bubbles: true,
+                        cancelable: true,
+                        composed: true,
+                        view: window,
+                        clientX: cx,
+                        clientY: cy,
+                        screenX: cx,
+                        screenY: cy,
+                        button: 0,
+                        buttons: 1
+                    };
+
+                    function dispatchPointer(type, buttonsVal) {
+                        if (typeof PointerEvent === 'function') {
+                            var opts = Object.assign({}, commonOpts, {
+                                buttons: buttonsVal,
+                                pointerId: 1,
+                                width: 1,
+                                height: 1,
+                                pressure: buttonsVal ? 0.5 : 0,
+                                pointerType: 'touch',
+                                isPrimary: true
+                            });
+                            el.dispatchEvent(new PointerEvent(type, opts));
+                        }
+                    }
+
+                    function dispatchTouch(type) {
+                        try {
+                            if (typeof Touch === 'function' && typeof TouchEvent === 'function') {
+                                var touch = new Touch({
+                                    identifier: Date.now() % 100000,
+                                    target: el,
+                                    clientX: cx,
+                                    clientY: cy,
+                                    pageX: cx + window.scrollX,
+                                    pageY: cy + window.scrollY,
+                                    screenX: cx,
+                                    screenY: cy,
+                                    radiusX: 2.5,
+                                    radiusY: 2.5,
+                                    force: type === 'touchstart' ? 1 : 0
+                                });
+                                var activeTouches = type === 'touchstart' ? [touch] : [];
+                                el.dispatchEvent(new TouchEvent(type, {
+                                    bubbles: true,
+                                    cancelable: true,
+                                    composed: true,
+                                    view: window,
+                                    touches: activeTouches,
+                                    targetTouches: activeTouches,
+                                    changedTouches: [touch]
+                                }));
+                                return;
+                            }
+                        } catch (e) {}
+                        try {
+                            el.dispatchEvent(new Event(type, { bubbles: true, cancelable: true }));
+                        } catch (e2) {}
+                    }
+
+                    try { dispatchPointer('pointerover', 0); } catch (e) {}
+                    try { dispatchPointer('pointerenter', 0); } catch (e) {}
+                    try { dispatchPointer('pointerdown', 1); } catch (e) {}
+                    try { dispatchTouch('touchstart'); } catch (e) {}
+                    try { el.dispatchEvent(new MouseEvent('mouseover', commonOpts)); } catch (e) {}
+                    try { el.dispatchEvent(new MouseEvent('mousedown', commonOpts)); } catch (e) {}
+                    try { dispatchPointer('pointerup', 0); } catch (e) {}
+                    try { dispatchTouch('touchend'); } catch (e) {}
+                    try { el.dispatchEvent(new MouseEvent('mouseup', Object.assign({}, commonOpts, { buttons: 0 }))); } catch (e) {}
+                    try { el.dispatchEvent(new MouseEvent('click', Object.assign({}, commonOpts, { buttons: 0 }))); } catch (e) {}
+                    try { if (typeof el.click === 'function') el.click(); } catch (e) {}
+                    try { dispatchPointer('pointercancel', 0); } catch (e) {}
+                    return true;
+                },
+                waitFor: function(selector, timeout) {
+                    var maxWait = typeof timeout === 'number' && timeout > 0 ? timeout : 10000;
+                    return new Promise(function(resolve, reject) {
+                        function check() {
+                            try {
+                                var found = typeof selector === 'function' ? selector() : document.querySelector(selector);
+                                if (found) return found;
+                            } catch (e) {}
+                            return null;
+                        }
+
+                        var immediate = check();
+                        if (immediate) {
+                            resolve(immediate);
+                            return;
+                        }
+
+                        var done = false;
+                        var obs = null;
+                        var poll = null;
+                        var timer = null;
+
+                        function cleanup() {
+                            done = true;
+                            if (obs) { try { obs.disconnect(); } catch (e) {} }
+                            if (poll) clearInterval(poll);
+                            if (timer) clearTimeout(timer);
+                        }
+
+                        function tryResolve() {
+                            if (done) return;
+                            var el = check();
+                            if (el) {
+                                cleanup();
+                                resolve(el);
+                            }
+                        }
+
+                        var root = document.body || document.documentElement;
+                        if (root && typeof MutationObserver === 'function') {
+                            obs = new MutationObserver(tryResolve);
+                            obs.observe(root, { childList: true, subtree: true, attributes: true });
+                        }
+                        poll = setInterval(tryResolve, 150);
+                        timer = setTimeout(function() {
+                            if (done) return;
+                            cleanup();
+                            reject(new Error('ArenaAI.dom.waitFor timeout: ' + selector));
+                        }, maxWait);
+                    });
+                }
+            },
             registerExtension: function(cfg) {
                 if (cfg && cfg.id) {
                     _registeredExtensions[cfg.id] = cfg;
