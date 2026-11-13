@@ -255,4 +255,62 @@ class ExampleRobolectricTest {
         assertTrue(ArenaJsInterface.SCRIPT_INJECTION.contains("Send message"))
         assertTrue(ArenaJsInterface.SCRIPT_INJECTION.contains("sawStopButton"))
     }
+
+    @Test
+    fun `default path validation persistence and automatic workspace recreation work properly`() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        assertEquals("/ArenaAI/", ArenaSettings().defaultPath)
+        assertTrue(ArenaSettingsRepository.isValidCustomPathInput("/CustomArena/"))
+        assertFalse(ArenaSettingsRepository.isValidCustomPathInput("../escape"))
+        assertFalse(ArenaSettingsRepository.isValidCustomPathInput("bad:path"))
+
+        val customSettings = ArenaSettings(defaultPath = "/CustomArena/Workspace")
+        ArenaSettingsRepository.saveSettings(context, customSettings)
+        ArenaSettingsRepository.ensureAddonWorkspaceInitialized(context, customSettings)
+
+        val root = context.getExternalFilesDir(null)!!
+        val customBase = File(root, "CustomArena/Workspace")
+        val settingsFile = File(customBase, ArenaSettingsRepository.SETTINGS_FILE_NAME)
+        val docFile = File(customBase, ArenaSettingsRepository.GUIDE_FILE_NAME)
+        val extDir = File(customBase, ArenaSettingsRepository.EXTENSIONS_SUBFOLDER)
+        val pluginDir = File(customBase, ArenaSettingsRepository.PLUGINS_SUBFOLDER)
+
+        assertTrue(settingsFile.exists())
+        assertTrue(docFile.exists())
+        assertTrue(extDir.isDirectory)
+        assertTrue(pluginDir.isDirectory)
+
+        // Delete document.md and extension/ and ensure scanAllAddons recreates them
+        docFile.delete()
+        extDir.deleteRecursively()
+        assertFalse(docFile.exists())
+        assertFalse(extDir.exists())
+
+        ArenaAddonManager.scanAllAddons(context, customSettings)
+        assertTrue(docFile.exists())
+        assertTrue(extDir.isDirectory)
+
+        // Restore default path so other tests remain clean
+        ArenaSettingsRepository.resetAllAppData(context)
+    }
+
+    @Test
+    fun `forceReload emits hot reload reset in sdk injection script`() {
+        val noReload = ArenaAddonManager.buildSiteSdkAndAddonsScript(
+            addons = emptyList(),
+            connectedEmail = "",
+            languageCode = "en",
+            forceReload = false
+        )
+        val withReload = ArenaAddonManager.buildSiteSdkAndAddonsScript(
+            addons = emptyList(),
+            connectedEmail = "",
+            languageCode = "en",
+            forceReload = true
+        )
+
+        assertTrue(noReload.contains("_resetForReload"))
+        assertFalse(noReload.contains("window.ArenaAI._resetForReload();"))
+        assertTrue(withReload.contains("window.ArenaAI._resetForReload();"))
+    }
 }

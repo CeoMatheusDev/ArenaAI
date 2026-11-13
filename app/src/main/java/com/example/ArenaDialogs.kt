@@ -3,7 +3,6 @@ package com.example
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -32,6 +31,7 @@ import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.Extension
+import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.RadioButtonChecked
@@ -45,12 +45,14 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -179,13 +181,15 @@ fun AppSettingsDialog(
     settings: ArenaSettings,
     onUpdateSettings: (ArenaSettings) -> Unit,
     onTestNotification: () -> Unit,
-    onAuthorizeSafFolder: () -> Unit,
+    onSaveDefaultPath: (String, Boolean) -> Unit,
+    onChooseSafFolder: () -> Unit,
     onOpenGuide: () -> Unit,
     onClearCacheData: () -> Unit,
     onResetApp: () -> Unit,
     onDismiss: () -> Unit
 ) {
     var showLanguagePicker by remember { mutableStateOf(false) }
+    var showDefaultPathDialog by remember { mutableStateOf(false) }
     var showResetConfirmation by remember { mutableStateOf(false) }
 
     val selectedLanguage = remember(settings.language) {
@@ -404,26 +408,70 @@ fun AppSettingsDialog(
                     onCheckedChange = { onUpdateSettings(settings.copy(autoScanAddonsOnStartup = it)) }
                 )
 
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    modifier = Modifier.fillMaxWidth()
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .minimumInteractiveComponentSize()
+                        .clickable { showDefaultPathDialog = true }
+                        .testTag("settings_default_path_button")
                 ) {
-                    OutlinedButton(
-                        onClick = onAuthorizeSafFolder,
-                        modifier = Modifier.weight(1f)
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp)
                     ) {
-                        Icon(Icons.Default.FolderOpen, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text(stringResource(R.string.btn_arena_folder), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Box(
+                            contentAlignment = Alignment.Center,
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f))
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Folder,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = stringResource(R.string.setting_default_path_title),
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Text(
+                                text = if (settings.safTreeUri.isNotBlank()) {
+                                    stringResource(R.string.setting_default_path_saf_subtitle, settings.defaultPath)
+                                } else {
+                                    stringResource(R.string.setting_default_path_subtitle, settings.defaultPath)
+                                },
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.primary,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                            contentDescription = stringResource(R.string.setting_default_path_title),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                     }
-                    OutlinedButton(
-                        onClick = onOpenGuide,
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Icon(Icons.Default.Description, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text(stringResource(R.string.btn_documentation), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    }
+                }
+
+                OutlinedButton(
+                    onClick = onOpenGuide,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("settings_document_button")
+                ) {
+                    Icon(Icons.Default.Description, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(stringResource(R.string.btn_documentation), maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
 
                 // Category 6: Maintenance & Data
@@ -472,6 +520,20 @@ fun AppSettingsDialog(
                 onUpdateSettings(settings.copy(language = chosen.code))
             },
             onDismiss = { showLanguagePicker = false }
+        )
+    }
+
+    if (showDefaultPathDialog) {
+        DefaultPathDialog(
+            currentPath = settings.defaultPath,
+            onSavePath = { newPath, clearSaf ->
+                showDefaultPathDialog = false
+                onSaveDefaultPath(newPath, clearSaf)
+            },
+            onChooseSafFolder = {
+                onChooseSafFolder()
+            },
+            onDismiss = { showDefaultPathDialog = false }
         )
     }
 
@@ -745,6 +807,104 @@ private fun SettingToggleRow(
 }
 
 @Composable
+fun DefaultPathDialog(
+    currentPath: String,
+    onSavePath: (String, Boolean) -> Unit,
+    onChooseSafFolder: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    var pathInput by remember(currentPath) { mutableStateOf(currentPath) }
+    var clearSafOnSave by remember { mutableStateOf(false) }
+    val isValid = remember(pathInput) { ArenaSettingsRepository.isValidCustomPathInput(pathInput) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        icon = {
+            Icon(
+                imageVector = Icons.Default.Folder,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary
+            )
+        },
+        title = {
+            Text(
+                text = stringResource(R.string.default_path_dialog_title),
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold
+            )
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    text = stringResource(R.string.default_path_dialog_desc),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                OutlinedTextField(
+                    value = pathInput,
+                    onValueChange = {
+                        pathInput = it
+                        clearSafOnSave = false
+                    },
+                    label = { Text(stringResource(R.string.default_path_input_label)) },
+                    placeholder = { Text(stringResource(R.string.default_path_input_hint)) },
+                    singleLine = true,
+                    isError = !isValid,
+                    supportingText = if (!isValid) {
+                        { Text(stringResource(R.string.toast_default_path_invalid)) }
+                    } else null,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("default_path_input")
+                )
+
+                OutlinedButton(
+                    onClick = onChooseSafFolder,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("default_path_choose_folder_button")
+                ) {
+                    Icon(Icons.Default.FolderOpen, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(stringResource(R.string.default_path_choose_folder))
+                }
+
+                TextButton(
+                    onClick = {
+                        pathInput = ArenaSettingsRepository.DEFAULT_PATH_DISPLAY
+                        clearSafOnSave = true
+                    },
+                    modifier = Modifier.testTag("default_path_restore_button")
+                ) {
+                    Icon(Icons.Default.RestartAlt, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(stringResource(R.string.default_path_restore))
+                }
+            }
+        },
+        confirmButton = {
+            FilledTonalButton(
+                onClick = {
+                    if (isValid) {
+                        onSavePath(pathInput, clearSafOnSave)
+                    }
+                },
+                enabled = isValid,
+                modifier = Modifier.testTag("default_path_save_button")
+            ) {
+                Text(stringResource(R.string.action_save))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.action_cancel))
+            }
+        }
+    )
+}
+
+@Composable
 fun ExtensionSettingsDialog(
     addons: List<ArenaAddon>,
     autoLoadEnabled: Boolean,
@@ -754,11 +914,11 @@ fun ExtensionSettingsDialog(
     onDeleteAddon: (ArenaAddon) -> Unit,
     onRescan: () -> Unit,
     onImportAddon: (AddonType) -> Unit,
-    onAuthorizeSafFolder: () -> Unit,
-    onOpenGuide: () -> Unit,
     onDismiss: () -> Unit
 ) {
     var showImportTypeChooser by remember { mutableStateOf(false) }
+    val extensions = remember(addons) { addons.filter { it.type == AddonType.EXTENSION } }
+    val plugins = remember(addons) { addons.filter { it.type == AddonType.PLUGIN } }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -821,42 +981,43 @@ fun ExtensionSettingsDialog(
 
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState())
+                    modifier = Modifier.fillMaxWidth()
                 ) {
                     FilledTonalButton(
                         onClick = onRescan,
                         enabled = !isScanning,
-                        modifier = Modifier.testTag("addons_rescan_button")
+                        modifier = Modifier
+                            .weight(1f)
+                            .testTag("addons_rescan_button")
                     ) {
-                        Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text(if (isScanning) stringResource(R.string.ext_scanning) else stringResource(R.string.ext_rescan))
+                        if (isScanning) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(16.dp),
+                                strokeWidth = 2.dp
+                            )
+                        } else {
+                            Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
+                        }
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = if (isScanning) stringResource(R.string.ext_scanning) else stringResource(R.string.ext_rescan),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
                     }
                     FilledTonalButton(
                         onClick = { showImportTypeChooser = true },
-                        modifier = Modifier.testTag("addons_import_button")
+                        modifier = Modifier
+                            .weight(1f)
+                            .testTag("addons_import_button")
                     ) {
                         Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text(stringResource(R.string.ext_import))
-                    }
-                    OutlinedButton(
-                        onClick = onAuthorizeSafFolder,
-                        modifier = Modifier.testTag("addons_folder_button")
-                    ) {
-                        Icon(Icons.Default.FolderOpen, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text(stringResource(R.string.btn_arena_folder))
-                    }
-                    OutlinedButton(
-                        onClick = onOpenGuide,
-                        modifier = Modifier.testTag("addons_guide_button")
-                    ) {
-                        Icon(Icons.Default.Description, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text(stringResource(R.string.btn_documentation))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = stringResource(R.string.ext_import),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
                     }
                 }
 
@@ -902,14 +1063,40 @@ fun ExtensionSettingsDialog(
                         verticalArrangement = Arrangement.spacedBy(8.dp),
                         modifier = Modifier
                             .fillMaxWidth()
-                            .heightIn(max = 300.dp)
+                            .heightIn(max = 320.dp)
                     ) {
-                        items(addons, key = { it.id }) { addon ->
-                            AddonItemCard(
-                                addon = addon,
-                                onToggle = { enabled -> onToggleAddon(addon, enabled) },
-                                onDelete = { onDeleteAddon(addon) }
-                            )
+                        if (extensions.isNotEmpty()) {
+                            item(key = "header_extensions") {
+                                AddonCategoryHeader(
+                                    icon = Icons.Default.Extension,
+                                    title = stringResource(R.string.ext_category_extensions),
+                                    count = extensions.size
+                                )
+                            }
+                            items(extensions, key = { it.id }) { addon ->
+                                AddonItemCard(
+                                    addon = addon,
+                                    onToggle = { enabled -> onToggleAddon(addon, enabled) },
+                                    onDelete = { onDeleteAddon(addon) }
+                                )
+                            }
+                        }
+
+                        if (plugins.isNotEmpty()) {
+                            item(key = "header_plugins") {
+                                AddonCategoryHeader(
+                                    icon = Icons.Default.Code,
+                                    title = stringResource(R.string.ext_category_plugins),
+                                    count = plugins.size
+                                )
+                            }
+                            items(plugins, key = { it.id }) { addon ->
+                                AddonItemCard(
+                                    addon = addon,
+                                    onToggle = { enabled -> onToggleAddon(addon, enabled) },
+                                    onDelete = { onDeleteAddon(addon) }
+                                )
+                            }
                         }
                     }
                 }
@@ -948,6 +1135,47 @@ fun ExtensionSettingsDialog(
                 }
             }
         )
+    }
+}
+
+@Composable
+private fun AddonCategoryHeader(
+    icon: ImageVector,
+    title: String,
+    count: Int
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 6.dp, bottom = 2.dp)
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.size(16.dp)
+        )
+        Spacer(modifier = Modifier.width(6.dp))
+        Text(
+            text = title,
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.primary,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.weight(1f)
+        )
+        Surface(
+            shape = RoundedCornerShape(10.dp),
+            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f)
+        ) {
+            Text(
+                text = count.toString(),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+            )
+        }
     }
 }
 

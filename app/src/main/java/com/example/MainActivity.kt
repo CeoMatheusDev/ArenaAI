@@ -375,7 +375,7 @@ fun ArenaAppScreen(
         )
     }
 
-    fun runAddonScan(notifyUser: Boolean = true) {
+    fun runAddonScan(notifyUser: Boolean = true, forceReload: Boolean = false) {
         if (webViewState.isScanningAddons) return
         webViewState.isScanningAddons = true
         val allowNotify = notifyUser && currentSettings.notifyOnFinish
@@ -408,7 +408,8 @@ fun ArenaAppScreen(
                     val script = ArenaAddonManager.buildSiteSdkAndAddonsScript(
                         addons = scanned,
                         connectedEmail = webViewState.connectedEmail,
-                        languageCode = currentSettings.language
+                        languageCode = currentSettings.language,
+                        forceReload = forceReload
                     )
                     webViewRef?.evaluateJavascript(script, null)
                 }
@@ -514,13 +515,18 @@ fun ArenaAppScreen(
             coroutineScope.launch(Dispatchers.IO) {
                 val res = ArenaAddonManager.importAddonFromUri(baseContext, uri, pendingImportType, currentSettings)
                 withContext(Dispatchers.Main) {
-                    res.onSuccess { name ->
+                    res.onSuccess { imported ->
+                        val msgRes = if (imported.moved) {
+                            R.string.toast_imported_moved
+                        } else {
+                            R.string.toast_imported
+                        }
                         Toast.makeText(
                             localizedContext,
-                            localizedContext.getString(R.string.toast_imported, name),
+                            localizedContext.getString(msgRes, imported.fileName),
                             Toast.LENGTH_SHORT
                         ).show()
-                        runAddonScan(notifyUser = currentSettings.notifyOnFinish)
+                        runAddonScan(notifyUser = currentSettings.notifyOnFinish, forceReload = true)
                     }.onFailure { err ->
                         Toast.makeText(
                             localizedContext,
@@ -553,7 +559,7 @@ fun ArenaAppScreen(
                 localizedContext.getString(R.string.toast_folder_linked),
                 Toast.LENGTH_SHORT
             ).show()
-            runAddonScan(notifyUser = currentSettings.notifyOnFinish)
+            runAddonScan(notifyUser = currentSettings.notifyOnFinish, forceReload = true)
             pendingPickDirectoryCallback?.invoke(treeUri.toString())
             pendingPickDirectoryCallback = null
         } else {
@@ -1115,7 +1121,37 @@ fun ArenaAppScreen(
                         ).show()
                     }
                 },
-                onAuthorizeSafFolder = {
+                onSaveDefaultPath = { rawPath, clearSaf ->
+                    if (!ArenaSettingsRepository.isValidCustomPathInput(rawPath)) {
+                        Toast.makeText(
+                            localizedContext,
+                            localizedContext.getString(R.string.toast_default_path_invalid),
+                            Toast.LENGTH_SHORT
+                        ).show()
+                    } else {
+                        val formattedPath = ArenaSettingsRepository.formatDisplayPath(rawPath)
+                        val updated = currentSettings.copy(
+                            defaultPath = formattedPath,
+                            safTreeUri = if (clearSaf) "" else currentSettings.safTreeUri
+                        )
+                        currentSettings = updated
+                        ArenaLocaleHelper.persistLanguageCode(baseContext, updated.language)
+                        ArenaLocaleHelper.persistNotifyPreference(baseContext, updated.notifyOnFinish)
+                        coroutineScope.launch(Dispatchers.IO) {
+                            ArenaSettingsRepository.saveSettings(baseContext, updated)
+                            ArenaSettingsRepository.ensureAddonWorkspaceInitialized(baseContext, updated)
+                            withContext(Dispatchers.Main) {
+                                Toast.makeText(
+                                    localizedContext,
+                                    localizedContext.getString(R.string.toast_default_path_updated, formattedPath),
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                                runAddonScan(notifyUser = currentSettings.notifyOnFinish, forceReload = true)
+                            }
+                        }
+                    }
+                },
+                onChooseSafFolder = {
                     try {
                         safFolderLauncher.launch(null)
                     } catch (_: Exception) {
@@ -1147,11 +1183,12 @@ fun ArenaAppScreen(
                 isScanning = webViewState.isScanningAddons,
                 onToggleAutoLoad = { enabled ->
                     persistSettings(currentSettings.copy(extensionsAutoLoad = enabled))
-                    if (enabled && ArenaOriginGuard.isAuthorizedUrl(webViewRef?.url)) {
+                    if (ArenaOriginGuard.isAuthorizedUrl(webViewRef?.url)) {
                         val script = ArenaAddonManager.buildSiteSdkAndAddonsScript(
-                            addons = webViewState.addons,
+                            addons = if (enabled) webViewState.addons else emptyList(),
                             connectedEmail = webViewState.connectedEmail,
-                            languageCode = currentSettings.language
+                            languageCode = currentSettings.language,
+                            forceReload = true
                         )
                         webViewRef?.evaluateJavascript(script, null)
                     }
@@ -1168,6 +1205,15 @@ fun ArenaAppScreen(
                         currentSettings.copy(disabledAddonIds = newDisabled)
                     )
                     persistSettings(synced)
+                    if (synced.extensionsAutoLoad && ArenaOriginGuard.isAuthorizedUrl(webViewRef?.url)) {
+                        val script = ArenaAddonManager.buildSiteSdkAndAddonsScript(
+                            addons = updatedAddons,
+                            connectedEmail = synced.connectedEmail,
+                            languageCode = synced.language,
+                            forceReload = true
+                        )
+                        webViewRef?.evaluateJavascript(script, null)
+                    }
                     Toast.makeText(
                         localizedContext,
                         localizedContext.getString(R.string.toast_saved_settings),
@@ -1178,27 +1224,15 @@ fun ArenaAppScreen(
                     coroutineScope.launch(Dispatchers.IO) {
                         ArenaAddonManager.deleteAddon(addon)
                         withContext(Dispatchers.Main) {
-                            runAddonScan(notifyUser = false)
+                            runAddonScan(notifyUser = false, forceReload = true)
                         }
                     }
                 },
-                onRescan = { runAddonScan(notifyUser = currentSettings.notifyOnFinish) },
+                onRescan = { runAddonScan(notifyUser = currentSettings.notifyOnFinish, forceReload = true) },
                 onImportAddon = { type ->
                     pendingImportType = type
                     importAddonLauncher.launch(arrayOf("*/*"))
                 },
-                onAuthorizeSafFolder = {
-                    try {
-                        safFolderLauncher.launch(null)
-                    } catch (_: Exception) {
-                        Toast.makeText(
-                            localizedContext,
-                            localizedContext.getString(R.string.toast_folder_picker_unavailable),
-                            Toast.LENGTH_SHORT
-                        ).show()
-                    }
-                },
-                onOpenGuide = { showGuideDialog = true },
                 onDismiss = { showExtensionsDialog = false }
             )
         }

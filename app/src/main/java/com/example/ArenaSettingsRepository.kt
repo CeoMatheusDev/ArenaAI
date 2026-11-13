@@ -26,6 +26,7 @@ data class ArenaSettings(
     val keepSessionCookies: Boolean = true,
     val language: String = AppLanguage.AUTO.code,
     val connectedEmail: String = "",
+    val defaultPath: String = ArenaSettingsRepository.DEFAULT_PATH_DISPLAY,
     val safTreeUri: String = "",
     val activeExtensions: List<String> = emptyList(),
     val activePlugins: List<String> = emptyList(),
@@ -34,6 +35,7 @@ data class ArenaSettings(
 
 object ArenaSettingsRepository {
     const val ROOT_FOLDER = "ArenaAI"
+    const val DEFAULT_PATH_DISPLAY = "/ArenaAI/"
     const val LEGACY_SETTINGS_FOLDER = "ArenaIA"
     const val SETTINGS_FILE_NAME = "settings.json"
     const val EXTENSIONS_SUBFOLDER = "extension"
@@ -45,17 +47,55 @@ object ArenaSettingsRepository {
     const val GUIDE_FILE_NAME = "document.md"
     private const val FOLDER_PLACEHOLDER_FILE = "README.txt"
 
+    fun normalizeRootFolder(rawPath: String?): String {
+        val raw = rawPath?.trim().orEmpty()
+        if (raw.isBlank() || raw.contains("\u0000")) return ROOT_FOLDER
+        val segments = raw.replace('\\', '/')
+            .split('/')
+            .map { it.trim() }
+            .filter { it.isNotEmpty() && it != "." }
+        if (segments.isEmpty() || segments.any { it == ".." || it.contains(":") || it.any { ch -> ch < ' ' } }) {
+            return ROOT_FOLDER
+        }
+        return segments.joinToString("/")
+    }
+
+    fun isValidCustomPathInput(rawPath: String?): Boolean {
+        val raw = rawPath?.trim().orEmpty()
+        if (raw.isBlank() || raw.contains("\u0000") || raw.contains("..") || raw.contains(":")) return false
+        val segments = raw.replace('\\', '/')
+            .split('/')
+            .map { it.trim() }
+            .filter { it.isNotEmpty() && it != "." }
+        return segments.isNotEmpty() && segments.none { seg -> seg.any { it < ' ' } }
+    }
+
+    fun formatDisplayPath(rawPath: String?): String {
+        return "/${normalizeRootFolder(rawPath)}/"
+    }
+
+    fun getActiveRootFolder(context: Context): String {
+        return normalizeRootFolder(readInternalDefaultPathCache(context))
+    }
+
     fun loadSettings(context: Context): ArenaSettings {
         val safUriStr = readInternalSafUriCache(context)
-        val jsonText = readFromSafRoot(context, safUriStr, SETTINGS_FILE_NAME)
-            ?: readFromRootExternal(ROOT_FOLDER, SETTINGS_FILE_NAME)
-            ?: readPublicDocumentText(context, ROOT_FOLDER, SETTINGS_FILE_NAME)
-            ?: readAppExternalFile(context, ROOT_FOLDER, SETTINGS_FILE_NAME)
+        val cachedDefaultPath = formatDisplayPath(readInternalDefaultPathCache(context))
+        val activeRoot = normalizeRootFolder(cachedDefaultPath)
+        val jsonText = readFromSafRoot(context, safUriStr, SETTINGS_FILE_NAME, activeRoot)
+            ?: readFromRootExternal(activeRoot, SETTINGS_FILE_NAME)
+            ?: readPublicDocumentText(context, activeRoot, SETTINGS_FILE_NAME)
+            ?: readAppExternalFile(context, activeRoot, SETTINGS_FILE_NAME)
+            ?: (if (activeRoot != ROOT_FOLDER) {
+                readFromRootExternal(ROOT_FOLDER, SETTINGS_FILE_NAME)
+                    ?: readPublicDocumentText(context, ROOT_FOLDER, SETTINGS_FILE_NAME)
+                    ?: readAppExternalFile(context, ROOT_FOLDER, SETTINGS_FILE_NAME)
+            } else null)
             ?: readPublicDocumentText(context, LEGACY_SETTINGS_FOLDER, "Settings.json")
             ?: readAppExternalFile(context, LEGACY_SETTINGS_FOLDER, "Settings.json")
 
         if (jsonText.isNullOrBlank()) {
-            val defaults = ArenaSettings(safTreeUri = safUriStr)
+            val defaults = ArenaSettings(defaultPath = cachedDefaultPath, safTreeUri = safUriStr)
             saveSettings(context, defaults)
             return defaults
         }
@@ -66,11 +106,13 @@ object ArenaSettingsRepository {
             val activeExt = parseStringList(obj.optJSONArray("activeExtensions"))
             val activePlug = parseStringList(obj.optJSONArray("activePlugins"))
             val loadedSaf = obj.optString("safTreeUri", safUriStr).ifBlank { safUriStr }
+            val loadedDefaultPath = formatDisplayPath(obj.optString("defaultPath", cachedDefaultPath))
             val loadedLang = AppLanguage.fromCode(obj.optString("language", AppLanguage.AUTO.code)).code
             val loadedNotify = obj.optBoolean("notifyOnFinish", true)
 
             ArenaLocaleHelper.persistLanguageCode(context, loadedLang)
             ArenaLocaleHelper.persistNotifyPreference(context, loadedNotify)
+            saveInternalDefaultPathCache(context, loadedDefaultPath)
 
             ArenaSettings(
                 fullscreen = obj.optBoolean("fullscreen", false),
@@ -86,20 +128,23 @@ object ArenaSettingsRepository {
                 keepSessionCookies = obj.optBoolean("keepSessionCookies", true),
                 language = loadedLang,
                 connectedEmail = obj.optString("connectedEmail", ""),
+                defaultPath = loadedDefaultPath,
                 safTreeUri = loadedSaf,
                 activeExtensions = activeExt,
                 activePlugins = activePlug,
                 disabledAddonIds = disabledIds
             )
         } catch (_: Exception) {
-            ArenaSettings(safTreeUri = safUriStr)
+            ArenaSettings(defaultPath = cachedDefaultPath, safTreeUri = safUriStr)
         }
     }
 
     fun saveSettings(context: Context, settings: ArenaSettings) {
-        if (settings.safTreeUri.isNotBlank()) {
-            saveInternalSafUriCache(context, settings.safTreeUri)
-        }
+        val activeRoot = normalizeRootFolder(settings.defaultPath)
+        val formattedPath = formatDisplayPath(activeRoot)
+
+        saveInternalSafUriCache(context, settings.safTreeUri)
+        saveInternalDefaultPathCache(context, formattedPath)
         ArenaLocaleHelper.persistLanguageCode(context, settings.language)
         ArenaLocaleHelper.persistNotifyPreference(context, settings.notifyOnFinish)
 
@@ -121,6 +166,7 @@ object ArenaSettingsRepository {
             put("keepSessionCookies", settings.keepSessionCookies)
             put("language", settings.language)
             put("connectedEmail", settings.connectedEmail)
+            put("defaultPath", formattedPath)
             put("safTreeUri", settings.safTreeUri)
             put("activeExtensions", JSONArray(settings.activeExtensions))
             put("activePlugins", JSONArray(settings.activePlugins))
@@ -129,16 +175,16 @@ object ArenaSettingsRepository {
         }
         val content = json.toString(2)
 
-        // 1. Always write to app-external ArenaAI/settings.json
-        writeAppExternalFile(context, ROOT_FOLDER, SETTINGS_FILE_NAME, content)
+        // 1. Always write to app-external <defaultPath>/settings.json
+        writeAppExternalFile(context, activeRoot, SETTINGS_FILE_NAME, content)
 
-        // 2. Try writing directly to /storage/emulated/0/ArenaAI/settings.json if permitted
-        writeToRootExternal(ROOT_FOLDER, SETTINGS_FILE_NAME, content)
+        // 2. Try writing directly to /storage/emulated/0/<defaultPath>/settings.json if permitted
+        writeToRootExternal(activeRoot, SETTINGS_FILE_NAME, content)
 
-        // 3. Write to Public Documents/ArenaAI/settings.json via MediaStore / File
+        // 3. Write to Public Documents/<defaultPath>/settings.json via MediaStore / File
         writePublicDocumentText(
             context = context,
-            subPath = ROOT_FOLDER,
+            subPath = activeRoot,
             fileName = SETTINGS_FILE_NAME,
             mimeType = "application/octet-stream",
             content = content
@@ -146,16 +192,17 @@ object ArenaSettingsRepository {
 
         // 4. Write to user-linked SAF folder if authorized
         if (settings.safTreeUri.isNotBlank()) {
-            writeToSafRoot(context, settings.safTreeUri, SETTINGS_FILE_NAME, "application/json", content)
+            writeToSafRoot(context, settings.safTreeUri, SETTINGS_FILE_NAME, "application/json", content, activeRoot)
         }
     }
 
     fun ensureAddonWorkspaceInitialized(context: Context, settings: ArenaSettings = loadSettings(context)) {
         var missingSettingsFile = false
+        val activeRoot = normalizeRootFolder(settings.defaultPath)
 
-        // 1. App-external ArenaAI/{settings.json, document.md, extension/, plugin/}
+        // 1. App-external <activeRoot>/{settings.json, document.md, extension/, plugin/}
         val appExternalRoot = context.getExternalFilesDir(null) ?: context.filesDir
-        val arenaDir = File(appExternalRoot, ROOT_FOLDER)
+        val arenaDir = File(appExternalRoot, activeRoot)
         val extDir = File(arenaDir, EXTENSIONS_SUBFOLDER)
         val pluginDir = File(arenaDir, PLUGINS_SUBFOLDER)
         if (!extDir.exists()) extDir.mkdirs()
@@ -163,26 +210,26 @@ object ArenaSettingsRepository {
 
         val appGuideFile = File(arenaDir, GUIDE_FILE_NAME)
         if (!appGuideFile.exists() || appGuideFile.length() == 0L) {
-            writeAppExternalFile(context, ROOT_FOLDER, GUIDE_FILE_NAME, ADDONS_GUIDE_MARKDOWN)
+            writeAppExternalFile(context, activeRoot, GUIDE_FILE_NAME, ADDONS_GUIDE_MARKDOWN)
         }
         val appSettingsFile = File(arenaDir, SETTINGS_FILE_NAME)
         if (!appSettingsFile.exists() || appSettingsFile.length() == 0L) {
             missingSettingsFile = true
         }
 
-        // 2. Attempt direct /storage/emulated/0/ArenaAI/ creation (Android <= 10 or permissive devices)
+        // 2. Attempt direct /storage/emulated/0/<activeRoot>/ creation (Android <= 10 or permissive devices)
         try {
             @Suppress("DEPRECATION")
             val rootStorage = Environment.getExternalStorageDirectory()
             if (rootStorage != null && rootStorage.canWrite()) {
-                val rootArena = File(rootStorage, ROOT_FOLDER)
+                val rootArena = File(rootStorage, activeRoot)
                 val rootExt = File(rootArena, EXTENSIONS_SUBFOLDER)
                 val rootPlug = File(rootArena, PLUGINS_SUBFOLDER)
                 if (!rootExt.exists()) rootExt.mkdirs()
                 if (!rootPlug.exists()) rootPlug.mkdirs()
                 val rootGuide = File(rootArena, GUIDE_FILE_NAME)
                 if (!rootGuide.exists() || rootGuide.length() == 0L) {
-                    writeToRootExternal(ROOT_FOLDER, GUIDE_FILE_NAME, ADDONS_GUIDE_MARKDOWN)
+                    writeToRootExternal(activeRoot, GUIDE_FILE_NAME, ADDONS_GUIDE_MARKDOWN)
                 }
                 val rootSettings = File(rootArena, SETTINGS_FILE_NAME)
                 if (!rootSettings.exists() || rootSettings.length() == 0L) {
@@ -192,47 +239,48 @@ object ArenaSettingsRepository {
         } catch (_: Exception) {
         }
 
-        // 3. Public Documents/ArenaAI/ via MediaStore (works on Android 10-16 without extra permissions)
+        // 3. Public Documents/<activeRoot>/ via MediaStore (works on Android 10-16 without extra permissions)
         val publicGuideExists = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            findPublicMediaStoreUri(context, ROOT_FOLDER, GUIDE_FILE_NAME) != null
+            findPublicMediaStoreUri(context, activeRoot, GUIDE_FILE_NAME) != null
         } else {
             @Suppress("DEPRECATION")
             val docsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS)
-            File(File(docsDir, ROOT_FOLDER), GUIDE_FILE_NAME).exists()
+            File(File(docsDir, activeRoot), GUIDE_FILE_NAME).exists()
         }
         if (!publicGuideExists) {
             writePublicDocumentText(
                 context = context,
-                subPath = ROOT_FOLDER,
+                subPath = activeRoot,
                 fileName = GUIDE_FILE_NAME,
                 mimeType = "application/octet-stream",
                 content = ADDONS_GUIDE_MARKDOWN
             )
         }
-        ensurePublicSubfolderExists(context, "$ROOT_FOLDER/$EXTENSIONS_SUBFOLDER")
-        ensurePublicSubfolderExists(context, "$ROOT_FOLDER/$PLUGINS_SUBFOLDER")
+        ensurePublicSubfolderExists(context, "$activeRoot/$EXTENSIONS_SUBFOLDER")
+        ensurePublicSubfolderExists(context, "$activeRoot/$PLUGINS_SUBFOLDER")
 
         val publicSettingsExists = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            findPublicMediaStoreUri(context, ROOT_FOLDER, SETTINGS_FILE_NAME) != null
+            findPublicMediaStoreUri(context, activeRoot, SETTINGS_FILE_NAME) != null
         } else {
             @Suppress("DEPRECATION")
             val docsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS)
-            File(File(docsDir, ROOT_FOLDER), SETTINGS_FILE_NAME).exists()
+            File(File(docsDir, activeRoot), SETTINGS_FILE_NAME).exists()
         }
         if (!publicSettingsExists || missingSettingsFile) {
             saveSettings(context, settings)
         }
 
-        // 4. If user authorized a SAF tree (e.g. Internal Storage/ArenaAI), create missing files/folders there too
+        // 4. If user authorized a SAF tree, create missing files/folders there too
         if (settings.safTreeUri.isNotBlank()) {
-            ensureSafWorkspace(context, settings.safTreeUri)
-            if (readFromSafRoot(context, settings.safTreeUri, SETTINGS_FILE_NAME).isNullOrBlank()) {
+            ensureSafWorkspace(context, settings.safTreeUri, activeRoot)
+            if (readFromSafRoot(context, settings.safTreeUri, SETTINGS_FILE_NAME, activeRoot).isNullOrBlank()) {
                 saveSettings(context, settings)
             }
         }
     }
 
     fun resetAllAppData(context: Context): ArenaSettings {
+        val previousRoot = getActiveRootFolder(context)
         val currentSafUri = readInternalSafUriCache(context)
         if (currentSafUri.isNotBlank()) {
             try {
@@ -250,8 +298,8 @@ object ArenaSettingsRepository {
         } catch (_: Exception) {
         }
 
-        // Delete app-external, internal, and external ArenaAI / legacy ArenaIA directories
-        val folderNames = listOf(ROOT_FOLDER, LEGACY_SETTINGS_FOLDER)
+        // Delete app-external, internal, and external ArenaAI / custom defaultPath / legacy ArenaIA directories
+        val folderNames = linkedSetOf(ROOT_FOLDER, LEGACY_SETTINGS_FOLDER, previousRoot)
         val baseCandidates = buildList {
             context.getExternalFilesDir(null)?.let { add(it) }
             add(context.filesDir)
@@ -279,12 +327,12 @@ object ArenaSettingsRepository {
             }
         }
 
-        // Delete MediaStore entries owned by this app inside Documents/ArenaAI and Documents/ArenaIA
+        // Delete MediaStore entries owned by this app inside Documents/ArenaAI, custom path, and Documents/ArenaIA
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             try {
                 val collection = MediaStore.Files.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
-                val selection = "${MediaStore.MediaColumns.RELATIVE_PATH} LIKE ? OR ${MediaStore.MediaColumns.RELATIVE_PATH} LIKE ?"
-                val selectionArgs = arrayOf("%$ROOT_FOLDER%", "%$LEGACY_SETTINGS_FOLDER%")
+                val selection = "${MediaStore.MediaColumns.RELATIVE_PATH} LIKE ? OR ${MediaStore.MediaColumns.RELATIVE_PATH} LIKE ? OR ${MediaStore.MediaColumns.RELATIVE_PATH} LIKE ?"
+                val selectionArgs = arrayOf("%$ROOT_FOLDER%", "%$LEGACY_SETTINGS_FOLDER%", "%$previousRoot%")
                 context.contentResolver.delete(collection, selection, selectionArgs)
             } catch (_: Exception) {
             }
@@ -324,11 +372,11 @@ object ArenaSettingsRepository {
         }
     }
 
-    private fun ensureSafWorkspace(context: Context, safTreeUriStr: String) {
+    private fun ensureSafWorkspace(context: Context, safTreeUriStr: String, rootFolder: String = ROOT_FOLDER) {
         try {
             val treeUri = Uri.parse(safTreeUriStr)
             val rootDocId = DocumentsContract.getTreeDocumentId(treeUri)
-            val targetParentId = ensureSafSubdir(context, treeUri, rootDocId, ROOT_FOLDER) ?: rootDocId
+            val targetParentId = ensureSafSubdirPath(context, treeUri, rootDocId, rootFolder) ?: rootDocId
             ensureSafSubdir(context, treeUri, targetParentId, EXTENSIONS_SUBFOLDER)
             ensureSafSubdir(context, treeUri, targetParentId, PLUGINS_SUBFOLDER)
             if (findSafChildDocId(context, treeUri, targetParentId, GUIDE_FILE_NAME) == null) {
@@ -338,12 +386,17 @@ object ArenaSettingsRepository {
         }
     }
 
-    private fun readFromSafRoot(context: Context, safTreeUriStr: String, fileName: String): String? {
+    private fun readFromSafRoot(
+        context: Context,
+        safTreeUriStr: String,
+        fileName: String,
+        rootFolder: String = ROOT_FOLDER
+    ): String? {
         if (safTreeUriStr.isBlank()) return null
         return try {
             val treeUri = Uri.parse(safTreeUriStr)
             val rootDocId = DocumentsContract.getTreeDocumentId(treeUri)
-            val arenaDocId = findSafChildDocId(context, treeUri, rootDocId, ROOT_FOLDER) ?: rootDocId
+            val arenaDocId = findSafSubdirPath(context, treeUri, rootDocId, rootFolder) ?: rootDocId
             val fileDocId = findSafChildDocId(context, treeUri, arenaDocId, fileName) ?: return null
             val docUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, fileDocId)
             context.contentResolver.openInputStream(docUri)?.bufferedReader()?.use { it.readText() }
@@ -357,12 +410,13 @@ object ArenaSettingsRepository {
         safTreeUriStr: String,
         fileName: String,
         mimeType: String,
-        content: String
+        content: String,
+        rootFolder: String = ROOT_FOLDER
     ) {
         try {
             val treeUri = Uri.parse(safTreeUriStr)
             val rootDocId = DocumentsContract.getTreeDocumentId(treeUri)
-            val arenaDocId = ensureSafSubdir(context, treeUri, rootDocId, ROOT_FOLDER) ?: rootDocId
+            val arenaDocId = ensureSafSubdirPath(context, treeUri, rootDocId, rootFolder) ?: rootDocId
             writeSafDocument(context, treeUri, arenaDocId, fileName, mimeType, content)
         } catch (_: Exception) {
         }
@@ -374,17 +428,45 @@ object ArenaSettingsRepository {
         subfolder: String,
         fileName: String,
         mimeType: String,
-        content: String
+        content: String,
+        rootFolder: String = ROOT_FOLDER
     ) {
         if (safTreeUriStr.isBlank()) return
         try {
             val treeUri = Uri.parse(safTreeUriStr)
             val rootDocId = DocumentsContract.getTreeDocumentId(treeUri)
-            val arenaDocId = ensureSafSubdir(context, treeUri, rootDocId, ROOT_FOLDER) ?: rootDocId
+            val arenaDocId = ensureSafSubdirPath(context, treeUri, rootDocId, rootFolder) ?: rootDocId
             val subDocId = ensureSafSubdir(context, treeUri, arenaDocId, subfolder) ?: return
             writeSafDocument(context, treeUri, subDocId, fileName, mimeType, content)
         } catch (_: Exception) {
         }
+    }
+
+    private fun ensureSafSubdirPath(
+        context: Context,
+        treeUri: Uri,
+        rootDocId: String,
+        relativePath: String
+    ): String? {
+        var current = rootDocId
+        for (segment in relativePath.split('/').filter { it.isNotBlank() }) {
+            current = ensureSafSubdir(context, treeUri, current, segment) ?: return null
+        }
+        return current
+    }
+
+    private fun findSafSubdirPath(
+        context: Context,
+        treeUri: Uri,
+        rootDocId: String,
+        relativePath: String
+    ): String? {
+        var current = rootDocId
+        for (segment in relativePath.split('/').filter { it.isNotBlank() }) {
+            if (current.endsWith(segment, ignoreCase = true)) continue
+            current = findSafChildDocId(context, treeUri, current, segment) ?: return null
+        }
+        return current
     }
 
     private fun findSafChildDocId(
@@ -625,6 +707,23 @@ object ArenaSettingsRepository {
         try {
             val prefs = context.getSharedPreferences("arena_internal_prefs", Context.MODE_PRIVATE)
             prefs.edit().putString("saf_tree_uri", uri).apply()
+        } catch (_: Exception) {
+        }
+    }
+
+    private fun readInternalDefaultPathCache(context: Context): String {
+        return try {
+            val prefs = context.getSharedPreferences("arena_internal_prefs", Context.MODE_PRIVATE)
+            prefs.getString("default_path", DEFAULT_PATH_DISPLAY) ?: DEFAULT_PATH_DISPLAY
+        } catch (_: Exception) {
+            DEFAULT_PATH_DISPLAY
+        }
+    }
+
+    private fun saveInternalDefaultPathCache(context: Context, path: String) {
+        try {
+            val prefs = context.getSharedPreferences("arena_internal_prefs", Context.MODE_PRIVATE)
+            prefs.edit().putString("default_path", path).apply()
         } catch (_: Exception) {
         }
     }

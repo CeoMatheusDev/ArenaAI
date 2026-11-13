@@ -94,7 +94,7 @@
     <string name="setting_autoload_title">Auto-load Extensions &amp; Plugins</string>
     <string name="setting_autoload_subtitle">Connects compatible add-ons when opening the site</string>
     <string name="setting_autoscan_title">Scan add-ons on startup</string>
-    <string name="setting_autoscan_subtitle">Automatically reads ArenaAI/extensions and plugins</string>
+    <string name="setting_autoscan_subtitle">Automatically reads extension/ and plugin/ in the active path</string>
     <string name="setting_autologin_title">Sign in with device accounts</string>
     <string name="setting_autologin_subtitle">Opens email picker when a login prompt is detected</string>
     <string name="setting_keep_cookies_title">Keep Session &amp; Cookies</string>
@@ -104,8 +104,18 @@
     <string name="language_dialog_title">Select Language</string>
     <string name="language_auto_label">Automatic (Device)</string>
     <string name="language_auto_resolved">Auto (%1$s)</string>
+    <string name="setting_default_path_title">Default Path</string>
+    <string name="setting_default_path_subtitle">Active: %1$s</string>
+    <string name="setting_default_path_saf_subtitle">Active: %1$s • Storage folder linked</string>
+    <string name="default_path_dialog_title">Default Path</string>
+    <string name="default_path_dialog_desc">Choose the default path used to create, generate, and read Arena AI files (settings.json, document.md, extension/, plugin/).</string>
+    <string name="default_path_input_label">Default Path</string>
+    <string name="default_path_input_hint">/ArenaAI/</string>
+    <string name="default_path_choose_folder">Choose Storage Folder</string>
+    <string name="default_path_restore">Reset /ArenaAI/</string>
+    <string name="action_save">Save</string>
     <string name="btn_arena_folder">ArenaAI Folder</string>
-    <string name="btn_documentation">documentation.md</string>
+    <string name="btn_documentation">document.md</string>
     <string name="action_reset_app">Reset App</string>
     <string name="reset_confirm_title">Reset Arena AI?</string>
     <string name="reset_confirm_message">This will erase all cached data, cookies, login session, preferences, and files inside the ArenaAI directory, then restore factory defaults.</string>
@@ -121,13 +131,15 @@
     <string name="ext_scanning">Scanning…</string>
     <string name="ext_import">Import</string>
     <string name="ext_empty_title">No add-ons found</string>
-    <string name="ext_empty_desc">Place .js files or manifest.json inside extensions/ or plugins/ in ArenaAI, or tap Import.</string>
+    <string name="ext_empty_desc">Place .js files or manifest.json inside extension/ or plugin/ in your Default Path, or tap Import.</string>
     <string name="ext_import_title">Import Add-on</string>
-    <string name="ext_import_desc">Choose which ArenaAI subfolder to save and connect the file (.js or .json):</string>
+    <string name="ext_import_desc">Choose the category so Arena AI moves the file into the default directory:</string>
     <string name="ext_type_extension">Extension</string>
     <string name="ext_type_plugin">Plugin</string>
-    <string name="ext_folder_extension">Extension (extensions/)</string>
-    <string name="ext_folder_plugin">Plugin (plugins/)</string>
+    <string name="ext_category_extensions">Extensions</string>
+    <string name="ext_category_plugins">Plugins</string>
+    <string name="ext_folder_extension">Extension (extension/)</string>
+    <string name="ext_folder_plugin">Plugin (plugin/)</string>
     <string name="action_remove">Remove</string>
 
     <!-- Toasts, Auth Popup & Storage Summary -->
@@ -135,8 +147,11 @@
     <string name="toast_connected_email">Connected with: %1$s</string>
     <string name="toast_no_accounts">No account list available on device</string>
     <string name="toast_imported">Imported: %1$s</string>
+    <string name="toast_imported_moved">Moved to default folder: %1$s</string>
     <string name="toast_import_error">Import error: %1$s</string>
-    <string name="toast_folder_linked">ArenaAI folder created/linked!</string>
+    <string name="toast_folder_linked">Storage folder linked to Default Path!</string>
+    <string name="toast_default_path_updated">Default Path updated: %1$s</string>
+    <string name="toast_default_path_invalid">Invalid path. Use a folder name like /ArenaAI/</string>
     <string name="toast_fullscreen_saved">Fullscreen saved to ArenaAI/settings.json</string>
     <string name="toast_cache_cleared">Cache cleared successfully</string>
     <string name="toast_file_manager_missing">No file manager found</string>

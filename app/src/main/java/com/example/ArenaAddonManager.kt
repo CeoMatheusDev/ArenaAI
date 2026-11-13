@@ -34,41 +34,48 @@ data class ArenaAddon(
     val isEnabled: Boolean
 )
 
+data class ImportedAddonResult(
+    val fileName: String,
+    val moved: Boolean
+)
+
 object ArenaAddonManager {
 
     private const val APP_VERSION = BuildConfig.VERSION_NAME
 
     fun scanAllAddons(context: Context, settings: ArenaSettings): List<ArenaAddon> {
+        ArenaSettingsRepository.ensureAddonWorkspaceInitialized(context, settings)
+        val activeRoot = ArenaSettingsRepository.normalizeRootFolder(settings.defaultPath)
         val found = linkedMapOf<String, ArenaAddon>()
 
-        // 1. Scan App External Mirror: <externalFilesDir>/ArenaAI/{extensions, plugins}
+        // 1. Scan App External Mirror: <externalFilesDir>/<defaultPath>/{extension, plugin}
         val appExternalRoot = context.getExternalFilesDir(null)
         if (appExternalRoot != null) {
-            val arenaRoot = File(appExternalRoot, ArenaSettingsRepository.ROOT_FOLDER)
+            val arenaRoot = File(appExternalRoot, activeRoot)
             scanArenaRootFileDir(arenaRoot, settings, found)
         }
 
-        // 2. Scan /storage/emulated/0/ArenaAI/{extensions, plugins} if readable
+        // 2. Scan /storage/emulated/0/<defaultPath>/{extension, plugin} if readable
         try {
             @Suppress("DEPRECATION")
             val rootStorage = Environment.getExternalStorageDirectory()
             if (rootStorage != null) {
-                scanArenaRootFileDir(File(rootStorage, ArenaSettingsRepository.ROOT_FOLDER), settings, found)
+                scanArenaRootFileDir(File(rootStorage, activeRoot), settings, found)
             }
         } catch (_: Exception) {
         }
 
-        // 3. Scan Public Documents/ArenaAI/{extensions, plugins} directly if accessible
+        // 3. Scan Public Documents/<defaultPath>/{extension, plugin} directly if accessible
         try {
             @Suppress("DEPRECATION")
             val docsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS)
-            scanArenaRootFileDir(File(docsDir, ArenaSettingsRepository.ROOT_FOLDER), settings, found)
+            scanArenaRootFileDir(File(docsDir, activeRoot), settings, found)
         } catch (_: Exception) {
         }
 
-        // 4. Scan MediaStore entries inside Documents/ArenaAI/{extensions, plugins} (Android 10+)
+        // 4. Scan MediaStore entries inside Documents/<defaultPath>/{extension, plugin} (Android 10+)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            scanMediaStoreAddons(context, settings, found)
+            scanMediaStoreAddons(context, settings, found, activeRoot)
         }
 
         // 5. Scan user-authorized SAF tree URI if configured
@@ -152,7 +159,8 @@ object ArenaAddonManager {
     private fun scanMediaStoreAddons(
         context: Context,
         settings: ArenaSettings,
-        result: MutableMap<String, ArenaAddon>
+        result: MutableMap<String, ArenaAddon>,
+        activeRoot: String = ArenaSettingsRepository.ROOT_FOLDER
     ) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return
         try {
@@ -163,7 +171,7 @@ object ArenaAddonManager {
                 MediaStore.MediaColumns.RELATIVE_PATH
             )
             val selection = "${MediaStore.MediaColumns.RELATIVE_PATH} LIKE ?"
-            val selectionArgs = arrayOf("%${ArenaSettingsRepository.ROOT_FOLDER}/%")
+            val selectionArgs = arrayOf("%$activeRoot/%")
 
             context.contentResolver.query(collection, projection, selection, selectionArgs, null)?.use { cursor ->
                 val idCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns._ID)
@@ -460,8 +468,10 @@ object ArenaAddonManager {
         uri: Uri,
         type: AddonType,
         settings: ArenaSettings
-    ): Result<String> {
+    ): Result<ImportedAddonResult> {
         return try {
+            ArenaSettingsRepository.ensureAddonWorkspaceInitialized(context, settings)
+            val activeRoot = ArenaSettingsRepository.normalizeRootFolder(settings.defaultPath)
             val fileName = queryDisplayName(context, uri) ?: "addon_${System.currentTimeMillis()}.js"
             val content = context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
                 ?: return Result.failure(IllegalStateException("Could not read the selected file."))
@@ -472,16 +482,29 @@ object ArenaAddonManager {
                 ArenaSettingsRepository.EXTENSIONS_SUBFOLDER
             }
 
-            // Save to app external ArenaAI subfolder
+            // Save to app external <defaultPath>/<subfolder>
             val baseDir = context.getExternalFilesDir(null) ?: context.filesDir
-            val targetDir = File(baseDir, "${ArenaSettingsRepository.ROOT_FOLDER}/$subfolder")
+            val targetDir = File(baseDir, "$activeRoot/$subfolder")
             if (!targetDir.exists()) targetDir.mkdirs()
-            File(targetDir, fileName).writeText(content)
+            val targetFile = File(targetDir, fileName)
+            targetFile.writeText(content)
 
-            // Mirror to public Documents/ArenaAI/<subfolder>
+            // Try direct /storage/emulated/0/<defaultPath>/<subfolder> when writable
+            try {
+                @Suppress("DEPRECATION")
+                val rootStorage = Environment.getExternalStorageDirectory()
+                if (rootStorage != null && rootStorage.canWrite()) {
+                    val directDir = File(rootStorage, "$activeRoot/$subfolder")
+                    if (!directDir.exists()) directDir.mkdirs()
+                    File(directDir, fileName).writeText(content)
+                }
+            } catch (_: Exception) {
+            }
+
+            // Mirror to public Documents/<defaultPath>/<subfolder>
             ArenaSettingsRepository.writePublicDocumentText(
                 context = context,
-                subPath = "${ArenaSettingsRepository.ROOT_FOLDER}/$subfolder",
+                subPath = "$activeRoot/$subfolder",
                 fileName = fileName,
                 mimeType = "application/octet-stream",
                 content = content
@@ -495,11 +518,29 @@ object ArenaAddonManager {
                     subfolder = subfolder,
                     fileName = fileName,
                     mimeType = "application/octet-stream",
-                    content = content
+                    content = content,
+                    rootFolder = activeRoot
                 )
             }
 
-            Result.success(fileName)
+            // Move semantics: delete source document when the provider permits deletion
+            var moved = false
+            if (targetFile.exists() && targetFile.length() > 0L) {
+                moved = try {
+                    if (uri.scheme.equals("file", ignoreCase = true) && !uri.path.isNullOrBlank()) {
+                        val srcFile = File(uri.path!!)
+                        srcFile.canonicalPath != targetFile.canonicalPath && srcFile.delete()
+                    } else if (DocumentsContract.isDocumentUri(context, uri)) {
+                        DocumentsContract.deleteDocument(context.contentResolver, uri)
+                    } else {
+                        context.contentResolver.delete(uri, null, null) > 0
+                    }
+                } catch (_: Exception) {
+                    false
+                }
+            }
+
+            Result.success(ImportedAddonResult(fileName = fileName, moved = moved))
         } catch (e: Exception) {
             Result.failure(e)
         }
@@ -531,7 +572,8 @@ object ArenaAddonManager {
     fun buildSiteSdkAndAddonsScript(
         addons: List<ArenaAddon>,
         connectedEmail: String,
-        languageCode: String = ArenaLocaleHelper.resolveEffectiveLanguageCode(AppLanguage.AUTO.code)
+        languageCode: String = ArenaLocaleHelper.resolveEffectiveLanguageCode(AppLanguage.AUTO.code),
+        forceReload: Boolean = false
     ): String {
         val activeAddons = addons.filter { it.compatible && it.isEnabled }
         val safeEmail = JSONObject.quote(connectedEmail)
@@ -836,6 +878,15 @@ object ArenaAddonManager {
             },
             registerExtension: function(cfg) {
                 if (cfg && cfg.id) {
+                    if (_registeredExtensions[cfg.id]) {
+                        try {
+                            if (typeof _registeredExtensions[cfg.id].onUnload === 'function') {
+                                _registeredExtensions[cfg.id].onUnload(window.ArenaAI);
+                            } else if (typeof _registeredExtensions[cfg.id].destroy === 'function') {
+                                _registeredExtensions[cfg.id].destroy(window.ArenaAI);
+                            }
+                        } catch (e) { console.error(e); }
+                    }
                     _registeredExtensions[cfg.id] = cfg;
                     if (typeof cfg.onReady === 'function') {
                         try { cfg.onReady(window.ArenaAI); } catch (e) { console.error(e); }
@@ -844,6 +895,15 @@ object ArenaAddonManager {
             },
             registerPlugin: function(cfg) {
                 if (cfg && cfg.id) {
+                    if (_registeredPlugins[cfg.id]) {
+                        try {
+                            if (typeof _registeredPlugins[cfg.id].onUnload === 'function') {
+                                _registeredPlugins[cfg.id].onUnload(window.ArenaAI);
+                            } else if (typeof _registeredPlugins[cfg.id].destroy === 'function') {
+                                _registeredPlugins[cfg.id].destroy(window.ArenaAI);
+                            }
+                        } catch (e) { console.error(e); }
+                    }
                     _registeredPlugins[cfg.id] = cfg;
                     if (typeof cfg.onReady === 'function') {
                         try { cfg.onReady(window.ArenaAI); } catch (e) { console.error(e); }
@@ -860,15 +920,44 @@ object ArenaAddonManager {
                 if (typeof cb === 'function') _accountCallbacks.push(cb);
             },
             _emitResponseComplete: function(preview) {
-                _responseCallbacks.forEach(function(cb) { try { cb(preview); } catch (e) {} });
+                _responseCallbacks.slice().forEach(function(cb) { try { cb(preview); } catch (e) {} });
             },
             _emitPromptSubmit: function(text) {
-                _promptCallbacks.forEach(function(cb) { try { cb(text); } catch (e) {} });
+                _promptCallbacks.slice().forEach(function(cb) { try { cb(text); } catch (e) {} });
             },
             _emitAccountConnected: function(email) {
                 window.ArenaAI.connectedEmail = email;
-                _accountCallbacks.forEach(function(cb) { try { cb(email); } catch (e) {} });
+                _accountCallbacks.slice().forEach(function(cb) { try { cb(email); } catch (e) {} });
                 window.dispatchEvent(new CustomEvent('arena-ai-login', { detail: { email: email } }));
+            },
+            _resetForReload: function() {
+                Object.keys(_registeredExtensions).forEach(function(id) {
+                    var cfg = _registeredExtensions[id];
+                    try {
+                        if (cfg && typeof cfg.onUnload === 'function') cfg.onUnload(window.ArenaAI);
+                        else if (cfg && typeof cfg.destroy === 'function') cfg.destroy(window.ArenaAI);
+                    } catch (e) { console.error(e); }
+                    delete _registeredExtensions[id];
+                });
+                Object.keys(_registeredPlugins).forEach(function(id) {
+                    var cfg = _registeredPlugins[id];
+                    try {
+                        if (cfg && typeof cfg.onUnload === 'function') cfg.onUnload(window.ArenaAI);
+                        else if (cfg && typeof cfg.destroy === 'function') cfg.destroy(window.ArenaAI);
+                    } catch (e) { console.error(e); }
+                    delete _registeredPlugins[id];
+                });
+                _responseCallbacks.length = 0;
+                _promptCallbacks.length = 0;
+                _accountCallbacks.length = 0;
+                try {
+                    var styles = document.querySelectorAll('style[data-arena-addon="true"]');
+                    for (var i = 0; i < styles.length; i++) {
+                        if (styles[i].parentNode) styles[i].parentNode.removeChild(styles[i]);
+                    }
+                } catch (e) {}
+                window._arenaLoadedAddons = {};
+                window.dispatchEvent(new CustomEvent('arena-ai-reload'));
             },
             fs: Object.freeze({
                 getArenaDir: function() {
@@ -923,9 +1012,14 @@ object ArenaAddonManager {
 })();
         """.trimIndent()
 
-        if (activeAddons.isEmpty()) return sdkHeader
+        if (!forceReload && activeAddons.isEmpty()) return sdkHeader
 
         val sb = StringBuilder(sdkHeader)
+        if (forceReload) {
+            sb.append("\n;(function() { if (window.ArenaAI && typeof window.ArenaAI._resetForReload === 'function') { window.ArenaAI._resetForReload(); } })();\n")
+        }
+        if (activeAddons.isEmpty()) return sb.toString()
+
         sb.append("\n")
         for (addon in activeAddons) {
             val safeId = JSONObject.quote(addon.id)

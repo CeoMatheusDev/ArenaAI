@@ -25,7 +25,8 @@ class ArenaFileBridge(
 
     fun getArenaDir(): String {
         val base = context.getExternalFilesDir(null) ?: context.filesDir
-        val arenaDir = File(base, ArenaSettingsRepository.ROOT_FOLDER)
+        val activeRoot = ArenaSettingsRepository.getActiveRootFolder(context)
+        val arenaDir = File(base, activeRoot)
         if (!arenaDir.exists()) arenaDir.mkdirs()
         return arenaDir.absolutePath
     }
@@ -224,14 +225,23 @@ class ArenaFileBridge(
         if (rawPath.contains("\u0000")) return null
 
         val arenaRoot = File(getArenaDir())
-        val allowedRoots = buildAllowedRoots(arenaRoot)
+        val activeRootFolder = ArenaSettingsRepository.getActiveRootFolder(context)
+        val allowedRoots = buildAllowedRoots(arenaRoot, activeRootFolder)
 
         val candidate = when {
-            rawPath == "." || rawPath == "/" || rawPath.equals("ArenaAI", ignoreCase = true) || rawPath.equals("/ArenaAI", ignoreCase = true) -> {
+            rawPath == "." || rawPath == "/" ||
+                rawPath.equals("ArenaAI", ignoreCase = true) ||
+                rawPath.equals("/ArenaAI", ignoreCase = true) ||
+                rawPath.equals(activeRootFolder, ignoreCase = true) ||
+                rawPath.equals("/$activeRootFolder", ignoreCase = true) -> {
                 arenaRoot
             }
             rawPath.startsWith("ArenaAI/", ignoreCase = true) || rawPath.startsWith("/ArenaAI/", ignoreCase = true) -> {
                 val sub = rawPath.removePrefix("/").substringAfter("/")
+                File(arenaRoot, sub)
+            }
+            rawPath.startsWith("$activeRootFolder/", ignoreCase = true) || rawPath.startsWith("/$activeRootFolder/", ignoreCase = true) -> {
+                val sub = rawPath.removePrefix("/").removePrefix(activeRootFolder).removePrefix("/")
                 File(arenaRoot, sub)
             }
             !rawPath.startsWith("/") -> {
@@ -251,11 +261,11 @@ class ArenaFileBridge(
             }
             if (!isInsideSandbox) return null
             if (mustExist && !canonicalCandidate.exists()) {
-                // Also try public Documents/ArenaAI fallback for relative paths if not in app external dir
+                // Also try public Documents/<activeRootFolder> fallback for relative paths if not in app external dir
                 if (!rawPath.startsWith("/")) {
                     @Suppress("DEPRECATION")
                     val docsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS)
-                    val publicCandidate = File(File(docsDir, ArenaSettingsRepository.ROOT_FOLDER), rawPath.removePrefix("ArenaAI/")).canonicalFile
+                    val publicCandidate = File(File(docsDir, activeRootFolder), rawPath.removePrefix("ArenaAI/")).canonicalFile
                     if (publicCandidate.exists()) return publicCandidate
                 }
             }
@@ -265,19 +275,19 @@ class ArenaFileBridge(
         }
     }
 
-    private fun buildAllowedRoots(arenaRoot: File): List<File> {
+    private fun buildAllowedRoots(arenaRoot: File, activeRootFolder: String): List<File> {
         val roots = mutableListOf(arenaRoot)
         context.getExternalFilesDir(null)?.let { roots.add(it) }
         try {
             @Suppress("DEPRECATION")
             val docsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS)
-            if (docsDir != null) roots.add(File(docsDir, ArenaSettingsRepository.ROOT_FOLDER))
+            if (docsDir != null) roots.add(File(docsDir, activeRootFolder))
         } catch (_: Exception) {
         }
         try {
             @Suppress("DEPRECATION")
             val extRoot = Environment.getExternalStorageDirectory()
-            if (extRoot != null) roots.add(File(extRoot, ArenaSettingsRepository.ROOT_FOLDER))
+            if (extRoot != null) roots.add(File(extRoot, activeRootFolder))
         } catch (_: Exception) {
         }
         return roots
@@ -290,10 +300,11 @@ class ArenaFileBridge(
             if (!canonicalFile.path.startsWith(arenaRoot.path + File.separator)) return
             val relative = canonicalFile.path.removePrefix(arenaRoot.path + File.separator)
             val parentRel = relative.substringBeforeLast(File.separator, "")
+            val activeRootFolder = ArenaSettingsRepository.getActiveRootFolder(context)
             val subPath = if (parentRel.isBlank()) {
-                ArenaSettingsRepository.ROOT_FOLDER
+                activeRootFolder
             } else {
-                "${ArenaSettingsRepository.ROOT_FOLDER}/$parentRel"
+                "$activeRootFolder/$parentRel"
             }
             ArenaSettingsRepository.writePublicDocumentText(
                 context = context,
@@ -310,7 +321,8 @@ class ArenaFileBridge(
                     subfolder = parentRel,
                     fileName = canonicalFile.name,
                     mimeType = "application/octet-stream",
-                    content = content
+                    content = content,
+                    rootFolder = activeRootFolder
                 )
             }
         } catch (_: Exception) {
