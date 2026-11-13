@@ -1145,7 +1145,6 @@ fun ArenaAppScreen(
                 addons = webViewState.addons,
                 autoLoadEnabled = webViewState.extensionsAutoLoad,
                 isScanning = webViewState.isScanningAddons,
-                storageSummary = ArenaSettingsRepository.getDisplayStorageSummary(baseContext, currentSettings),
                 onToggleAutoLoad = { enabled ->
                     persistSettings(currentSettings.copy(extensionsAutoLoad = enabled))
                     if (enabled && ArenaOriginGuard.isAuthorizedUrl(webViewRef?.url)) {
