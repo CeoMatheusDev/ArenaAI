@@ -153,7 +153,7 @@ object ArenaSettingsRepository {
     fun ensureAddonWorkspaceInitialized(context: Context, settings: ArenaSettings = loadSettings(context)) {
         var missingSettingsFile = false
 
-        // 1. App-external ArenaAI/{extensions, plugins, documentation.md, settings.json}
+        // 1. App-external ArenaAI/{settings.json, document.md, extension/, plugin/}
         val appExternalRoot = context.getExternalFilesDir(null) ?: context.filesDir
         val arenaDir = File(appExternalRoot, ROOT_FOLDER)
         val extDir = File(arenaDir, EXTENSIONS_SUBFOLDER)
@@ -664,9 +664,9 @@ The application automatically creates and monitors the following files and folde
 ```text
 ArenaAI/
 ├── settings.json      # All app settings: fullscreen, keep awake, notifications, language, background mode, and active extensions/plugins
-├── documentation.md   # This manual with parameters and developer instructions
-├── extensions/        # Place your Extensions here (.js file or subfolder with manifest.json)
-└── plugins/           # Place your Plugins here (.js file or subfolder with manifest.json)
+├── document.md        # This manual with parameters and developer instructions
+├── extension/         # Place your Extensions here (.js file or subfolder with manifest.json)
+└── plugin/            # Place your Plugins here (.js file or subfolder with manifest.json)
 ```
 
 > **Tip:** To link a custom `ArenaAI` folder in internal storage, open **Menu (⋮) → Settings → ArenaAI Folder** (or **Extension → ArenaAI Folder**) and select or create the directory.
@@ -723,7 +723,7 @@ Whenever **Arena AI** launches (when notifications and startup scan are enabled)
 ---
 
 ### Option B — Single `.js` File (With Metadata Header)
-Save a `.js` file directly inside `ArenaAI/extensions/` or `ArenaAI/plugins/`:
+Save a `.js` file directly inside `ArenaAI/extension/` or `ArenaAI/plugin/`:
 
 ```javascript
 // ==ArenaAI==
@@ -797,7 +797,7 @@ The app exposes `window.ArenaFS` (`addJavascriptInterface(..., "ArenaFS")`) in W
 ```javascript
 // Example using ArenaFS inside an extension or plugin
 const list = JSON.parse(window.ArenaFS.listFiles("extensions"));
-window.ArenaFS.writeFile("plugins/notes.txt", "Saved by plugin!");
+window.ArenaFS.writeFile("plugin/notes.txt", "Saved by plugin!");
 const config = window.ArenaFS.readFile("settings.json");
 ```
 
