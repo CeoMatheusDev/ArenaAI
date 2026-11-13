@@ -36,12 +36,13 @@ object ArenaSettingsRepository {
     const val ROOT_FOLDER = "ArenaAI"
     const val LEGACY_SETTINGS_FOLDER = "ArenaIA"
     const val SETTINGS_FILE_NAME = "settings.json"
-    const val EXTENSIONS_SUBFOLDER = "extensions"
-    const val LEGACY_EXTENSIONS_SUBFOLDER = "extencao"
-    const val LEGACY_EXTENSIONS_ALT_SUBFOLDER = "extensão"
-    const val PLUGINS_SUBFOLDER = "plugins"
-    const val LEGACY_PLUGINS_SUBFOLDER = "plugin"
-    const val GUIDE_FILE_NAME = "documentation.md"
+    const val EXTENSIONS_SUBFOLDER = "extension"
+    const val LEGACY_EXTENSIONS_SUBFOLDER = "extensions"
+    const val LEGACY_EXTENSIONS_ALT_SUBFOLDER = "extencao"
+    const val LEGACY_EXTENSIONS_ACCENT_SUBFOLDER = "extensão"
+    const val PLUGINS_SUBFOLDER = "plugin"
+    const val LEGACY_PLUGINS_SUBFOLDER = "plugins"
+    const val GUIDE_FILE_NAME = "document.md"
     private const val FOLDER_PLACEHOLDER_FILE = "README.txt"
 
     fun loadSettings(context: Context): ArenaSettings {
@@ -300,22 +301,6 @@ object ArenaSettingsRepository {
         ensureAddonWorkspaceInitialized(context, defaults)
         saveSettings(context, defaults)
         return defaults
-    }
-
-    fun getDisplayStorageSummary(context: Context, settings: ArenaSettings): String {
-        val localized = ArenaLocaleHelper.localizedContext(context, settings.language)
-        val appPath = File(context.getExternalFilesDir(null), ROOT_FOLDER).absolutePath
-        return buildString {
-            append("${localized.getString(R.string.storage_public_folder)}\n  Documents/$ROOT_FOLDER/\n")
-            append("  ├── $SETTINGS_FILE_NAME\n")
-            append("  ├── $GUIDE_FILE_NAME\n")
-            append("  ├── $EXTENSIONS_SUBFOLDER/\n")
-            append("  └── $PLUGINS_SUBFOLDER/\n")
-            if (settings.safTreeUri.isNotBlank()) {
-                append("\n${localized.getString(R.string.storage_saf_active)}\n")
-            }
-            append("\n${localized.getString(R.string.storage_local_mirror)}\n  $appPath")
-        }
     }
 
     private fun ensurePublicSubfolderExists(context: Context, subPath: String) {
@@ -668,7 +653,7 @@ object ArenaSettingsRepository {
 # Official Extensions and Plugins Documentation — Arena AI
 
 Welcome to the developer guide for **Arena AI Extensions & Plugins** (`https://arena.ai/agent`).
-This document (`ArenaAI/documentation.md`) provides an introduction, directory layout, required parameters, and the bridge API connecting the web app, your add-on, and the Android client.
+This document (`ArenaAI/document.md`) provides an introduction, directory layout, required parameters, and the bridge API connecting the web app, your add-on, and the Android client.
 
 ---
 
@@ -691,7 +676,7 @@ ArenaAI/
 ## 2. Automatic Add-on Discovery
 
 Whenever **Arena AI** launches (when notifications and startup scan are enabled):
-1. Silently displays **"Scanning for add-ons…"** while reading `ArenaAI/extensions/` and `ArenaAI/plugins/` in the background (legacy `extencao/` and `plugin/` folders are also supported).
+1. Silently displays **"Scanning for add-ons…"** while reading `ArenaAI/extension/` and `ArenaAI/plugin/` in the background (legacy `extencao/` and `plugin/` folders are also supported).
 2. Validates the manifest/header and compatibility with the app version (`2.0.0`) and `arena.ai/agent`.
 3. If compatible add-ons are found, posts a notification letting you know compatible add-ons are ready.
 4. If the folders are empty, the scanning notification closes automatically.
