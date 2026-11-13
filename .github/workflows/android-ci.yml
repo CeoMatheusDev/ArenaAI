@@ -44,11 +44,24 @@ jobs:
           set -o pipefail
           "$SDKMANAGER" --install "platforms;android-36" "build-tools;36.0.0" "platform-tools"
 
-      # The repository currently does not include the Gradle Wrapper scripts/JAR.
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v6
         with:
           gradle-version: '9.3.1'
+
+      # The application build script explicitly expects this file at the repository root.
+      # Generate a disposable debug-only key; never commit or upload it.
+      - name: Generate temporary debug keystore
+        run: |
+          keytool -genkeypair -v \
+            -keystore debug.keystore \
+            -storepass android \
+            -alias androiddebugkey \
+            -keypass android \
+            -dname "CN=Android Debug,O=Android,C=US" \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 10000
 
       - name: Run unit tests and assemble debug APK
         run: gradle --no-daemon testDebugUnitTest assembleDebug
