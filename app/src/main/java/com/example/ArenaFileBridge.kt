@@ -6,7 +6,6 @@ import android.os.Environment
 import android.os.Handler
 import android.os.Looper
 import android.provider.DocumentsContract
-import android.webkit.JavascriptInterface
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -19,7 +18,11 @@ class ArenaFileBridge(
 ) {
     private val mainHandler = Handler(Looper.getMainLooper())
 
-    @JavascriptInterface
+    companion object {
+        const val MAX_PATH_CHARS = 512
+        const val MAX_WRITE_CHARS = 524_288
+    }
+
     fun getArenaDir(): String {
         val base = context.getExternalFilesDir(null) ?: context.filesDir
         val arenaDir = File(base, ArenaSettingsRepository.ROOT_FOLDER)
@@ -27,21 +30,36 @@ class ArenaFileBridge(
         return arenaDir.absolutePath
     }
 
-    @JavascriptInterface
     fun getAuthorizedDirectoryUri(): String {
         return ArenaSettingsRepository.loadSettings(context).safTreeUri
     }
 
-    @JavascriptInterface
+    fun isPathAllowed(path: String?): Boolean {
+        val raw = path?.trim().orEmpty()
+        if (!isValidRawPath(raw)) return false
+        if (raw.startsWith("content://")) {
+            return try {
+                isSafUriAuthorized(Uri.parse(raw))
+            } catch (_: Exception) {
+                false
+            }
+        }
+        return resolveSandboxedFile(raw, mustExist = false) != null
+    }
+
     fun listFiles(path: String?): String {
         val result = JSONObject()
         return try {
             val raw = path?.trim().orEmpty()
-            if (raw.startsWith("content://")) {
-                return listSafDirectory(raw)
+            val normalized = raw.ifBlank { "." }
+            if (!isValidRawPath(normalized)) {
+                return errorJson("Invalid path.")
+            }
+            if (normalized.startsWith("content://")) {
+                return listSafDirectory(normalized)
             }
 
-            val dir = resolveSandboxedFile(raw.ifBlank { "." }, mustExist = true)
+            val dir = resolveSandboxedFile(normalized, mustExist = true)
                 ?: return errorJson("Invalid path or outside allowed sandbox directory.")
 
             if (!dir.exists() || !dir.isDirectory) {
@@ -71,10 +89,9 @@ class ArenaFileBridge(
         }
     }
 
-    @JavascriptInterface
     fun readFile(path: String?): String? {
         val raw = path?.trim().orEmpty()
-        if (raw.isBlank()) return null
+        if (raw.isBlank() || !isValidRawPath(raw)) return null
 
         if (raw.startsWith("content://")) {
             return try {
@@ -95,10 +112,10 @@ class ArenaFileBridge(
         }
     }
 
-    @JavascriptInterface
     fun writeFile(path: String?, content: String?): Boolean {
         val raw = path?.trim().orEmpty()
-        if (raw.isBlank() || content == null) return false
+        if (raw.isBlank() || content == null || !isValidRawPath(raw)) return false
+        if (content.length > MAX_WRITE_CHARS) return false
 
         if (raw.startsWith("content://")) {
             return try {
@@ -128,10 +145,9 @@ class ArenaFileBridge(
         }
     }
 
-    @JavascriptInterface
     fun exists(path: String?): Boolean {
         val raw = path?.trim().orEmpty()
-        if (raw.isBlank()) return false
+        if (raw.isBlank() || !isValidRawPath(raw)) return false
         if (raw.startsWith("content://")) {
             return try {
                 val uri = Uri.parse(raw)
@@ -146,10 +162,9 @@ class ArenaFileBridge(
         return file.exists()
     }
 
-    @JavascriptInterface
     fun mkdir(path: String?): Boolean {
         val raw = path?.trim().orEmpty()
-        if (raw.isBlank()) return false
+        if (raw.isBlank() || !isValidRawPath(raw)) return false
         val dir = resolveSandboxedFile(raw, mustExist = false) ?: return false
         return try {
             dir.exists() || dir.mkdirs()
@@ -158,10 +173,9 @@ class ArenaFileBridge(
         }
     }
 
-    @JavascriptInterface
     fun deleteFile(path: String?): Boolean {
         val raw = path?.trim().orEmpty()
-        if (raw.isBlank()) return false
+        if (raw.isBlank() || !isValidRawPath(raw)) return false
         val file = resolveSandboxedFile(raw, mustExist = true) ?: return false
         // Prevent deleting the root ArenaAI folder itself
         if (file.canonicalPath == File(getArenaDir()).canonicalPath) return false
@@ -172,7 +186,14 @@ class ArenaFileBridge(
         }
     }
 
-    @JavascriptInterface
+    fun pickDirectoryAsync(onResult: (String) -> Unit) {
+        mainHandler.post {
+            onRequestPickDirectory { uri ->
+                onResult(uri ?: "")
+            }
+        }
+    }
+
     fun pickDirectory(): String {
         val latch = CountDownLatch(1)
         var pickedUri: String? = null
@@ -190,6 +211,13 @@ class ArenaFileBridge(
         } catch (_: InterruptedException) {
             ""
         }
+    }
+
+    private fun isValidRawPath(rawPath: String): Boolean {
+        if (rawPath.length > MAX_PATH_CHARS) return false
+        if (rawPath.contains("\u0000")) return false
+        if (rawPath.any { it < ' ' && it != '\t' }) return false
+        return true
     }
 
     private fun resolveSandboxedFile(rawPath: String, mustExist: Boolean): File? {

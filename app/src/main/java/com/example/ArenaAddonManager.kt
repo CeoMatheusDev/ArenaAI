@@ -546,6 +546,93 @@ object ArenaAddonManager {
         var _accountCallbacks = [];
         var _registeredExtensions = {};
         var _registeredPlugins = {};
+        var _pendingCalls = {};
+        var _callSeq = 0;
+        var _bridgeBound = false;
+        var _ALLOWED_NATIVE_OPS = Object.freeze([
+            'generation.started',
+            'generation.finished',
+            'auth.requestLogin',
+            'notification.show',
+            'filesystem.getDir',
+            'filesystem.getAuthorizedUri',
+            'filesystem.list',
+            'filesystem.read',
+            'filesystem.write',
+            'filesystem.exists',
+            'filesystem.mkdir',
+            'filesystem.delete',
+            'filesystem.pickDirectory'
+        ]);
+
+        function _bindBridgeListener() {
+            var bridge = window._arenaNativeBridge;
+            if (!bridge || _bridgeBound) return;
+            _bridgeBound = true;
+            bridge.onmessage = function(event) {
+                try {
+                    var raw = event && typeof event.data === 'string' ? event.data : '';
+                    if (!raw) return;
+                    var res = JSON.parse(raw);
+                    if (!res || typeof res.callId !== 'string') return;
+                    var pending = _pendingCalls[res.callId];
+                    if (!pending) return;
+                    delete _pendingCalls[res.callId];
+                    clearTimeout(pending.timer);
+                    if (res.ok) {
+                        pending.resolve(res.data || {});
+                    } else {
+                        var errObj = res.error || {};
+                        var err = new Error(errObj.message || 'Native bridge error');
+                        err.code = errObj.code || 'BRIDGE_ERROR';
+                        pending.reject(err);
+                    }
+                } catch (e) {}
+            };
+        }
+        _bindBridgeListener();
+
+        function invokeNative(op, payload) {
+            return new Promise(function(resolve, reject) {
+                var bridge = window._arenaNativeBridge;
+                if (!bridge || typeof bridge.postMessage !== 'function') {
+                    var unavail = new Error('Native Origin Guard bridge is unavailable on this origin or WebView.');
+                    unavail.code = 'BRIDGE_UNAVAILABLE';
+                    reject(unavail);
+                    return;
+                }
+                _bindBridgeListener();
+                if (_ALLOWED_NATIVE_OPS.indexOf(op) === -1) {
+                    var disallowed = new Error('Operation not allowed: ' + op);
+                    disallowed.code = 'OPERATION_NOT_ALLOWED';
+                    reject(disallowed);
+                    return;
+                }
+                _callSeq += 1;
+                var callId = 'sdk_' + Date.now() + '_' + _callSeq + '_' + Math.random().toString(36).slice(2, 8);
+                var timeoutMs = op === 'filesystem.pickDirectory' ? 130000 : 15000;
+                var timer = setTimeout(function() {
+                    if (_pendingCalls[callId]) {
+                        delete _pendingCalls[callId];
+                        var timeoutErr = new Error('Native bridge call timed out: ' + op);
+                        timeoutErr.code = 'TIMEOUT';
+                        reject(timeoutErr);
+                    }
+                }, timeoutMs);
+                _pendingCalls[callId] = { resolve: resolve, reject: reject, timer: timer };
+                try {
+                    bridge.postMessage(JSON.stringify({
+                        callId: callId,
+                        op: op,
+                        payload: (payload && typeof payload === 'object' && !Array.isArray(payload)) ? payload : {}
+                    }));
+                } catch (sendErr) {
+                    clearTimeout(timer);
+                    delete _pendingCalls[callId];
+                    reject(sendErr);
+                }
+            });
+        }
 
         window.ArenaAI = {
             version: ${JSONObject.quote(APP_VERSION)},
@@ -554,15 +641,21 @@ object ArenaAddonManager {
             connectedEmail: $safeEmail,
             extensions: _registeredExtensions,
             plugins: _registeredPlugins,
+            native: Object.freeze({
+                isAvailable: function() {
+                    return !!(window._arenaNativeBridge && typeof window._arenaNativeBridge.postMessage === 'function');
+                },
+                operations: _ALLOWED_NATIVE_OPS,
+                invoke: invokeNative
+            }),
             requestLogin: function() {
-                if (window.AndroidBridge && window.AndroidBridge.requestLogin) {
-                    window.AndroidBridge.requestLogin(window.location.href);
-                }
+                return invokeNative('auth.requestLogin', { sourceUrl: window.location.href });
             },
             notify: function(title, message) {
-                if (window.AndroidBridge && window.AndroidBridge.showCustomNotification) {
-                    window.AndroidBridge.showCustomNotification(String(title || 'Arena AI'), String(message || ''));
-                }
+                return invokeNative('notification.show', {
+                    title: String(title || 'Arena AI'),
+                    message: String(message || '')
+                });
             },
             storage: {
                 get: function(key) {
@@ -777,7 +870,48 @@ object ArenaAddonManager {
                 _accountCallbacks.forEach(function(cb) { try { cb(email); } catch (e) {} });
                 window.dispatchEvent(new CustomEvent('arena-ai-login', { detail: { email: email } }));
             },
-            fs: window.ArenaFS || null
+            fs: Object.freeze({
+                getArenaDir: function() {
+                    return invokeNative('filesystem.getDir', {}).then(function(d) { return d && d.path ? d.path : ''; });
+                },
+                getAuthorizedDirectoryUri: function() {
+                    return invokeNative('filesystem.getAuthorizedUri', {}).then(function(d) { return d && d.uri ? d.uri : ''; });
+                },
+                listFiles: function(path) {
+                    return invokeNative('filesystem.list', { path: path == null ? '.' : String(path) });
+                },
+                readFile: function(path) {
+                    return invokeNative('filesystem.read', { path: String(path || '') }).then(function(d) {
+                        return d && typeof d.content === 'string' ? d.content : null;
+                    });
+                },
+                writeFile: function(path, content) {
+                    return invokeNative('filesystem.write', {
+                        path: String(path || ''),
+                        content: content == null ? '' : String(content)
+                    }).then(function(d) { return !!(d && d.written); });
+                },
+                exists: function(path) {
+                    return invokeNative('filesystem.exists', { path: String(path || '') }).then(function(d) {
+                        return !!(d && d.exists);
+                    });
+                },
+                mkdir: function(path) {
+                    return invokeNative('filesystem.mkdir', { path: String(path || '') }).then(function(d) {
+                        return !!(d && d.created);
+                    });
+                },
+                deleteFile: function(path) {
+                    return invokeNative('filesystem.delete', { path: String(path || '') }).then(function(d) {
+                        return !!(d && d.deleted);
+                    });
+                },
+                pickDirectory: function() {
+                    return invokeNative('filesystem.pickDirectory', {}).then(function(d) {
+                        return d && d.uri ? d.uri : '';
+                    });
+                }
+            })
         };
     } else {
         window.ArenaAI.connectedEmail = $safeEmail;
@@ -785,7 +919,6 @@ object ArenaAddonManager {
             window.ArenaAI.language = $safeLang;
             window.dispatchEvent(new CustomEvent('arena-ai-language', { detail: { language: $safeLang } }));
         }
-        window.ArenaAI.fs = window.ArenaFS || window.ArenaAI.fs || null;
     }
 })();
         """.trimIndent()

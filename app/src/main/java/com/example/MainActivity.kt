@@ -97,7 +97,9 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.webkit.WebViewCompat
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -145,7 +147,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        WebView.setWebContentsDebuggingEnabled(true)
+        WebView.setWebContentsDebuggingEnabled(BuildConfig.DEBUG)
         enableEdgeToEdge()
 
         // Load persisted ArenaAI/settings.json and ensure ArenaAI directory structure exists
@@ -354,12 +356,14 @@ fun ArenaAppScreen(
             wv.reload()
         }
 
-        val sdkScript = ArenaAddonManager.buildSiteSdkAndAddonsScript(
-            addons = if (webViewState.extensionsAutoLoad) webViewState.addons else emptyList(),
-            connectedEmail = webViewState.connectedEmail,
-            languageCode = currentSettings.language
-        )
-        wv.evaluateJavascript(sdkScript, null)
+        if (ArenaOriginGuard.isAuthorizedUrl(wv.url)) {
+            val sdkScript = ArenaAddonManager.buildSiteSdkAndAddonsScript(
+                addons = if (webViewState.extensionsAutoLoad) webViewState.addons else emptyList(),
+                connectedEmail = webViewState.connectedEmail,
+                languageCode = currentSettings.language
+            )
+            wv.evaluateJavascript(sdkScript, null)
+        }
     }
 
     fun syncActiveAddonsInSettings(addons: List<ArenaAddon>, baseSettings: ArenaSettings): ArenaSettings {
@@ -400,7 +404,7 @@ fun ArenaAppScreen(
                 } else {
                     NotificationHelper.cancelScanningNotification(baseContext)
                 }
-                if (webViewState.extensionsAutoLoad) {
+                if (webViewState.extensionsAutoLoad && ArenaOriginGuard.isAuthorizedUrl(webViewRef?.url)) {
                     val script = ArenaAddonManager.buildSiteSdkAndAddonsScript(
                         addons = scanned,
                         connectedEmail = webViewState.connectedEmail,
@@ -1145,7 +1149,7 @@ fun ArenaAppScreen(
                 storageSummary = ArenaSettingsRepository.getDisplayStorageSummary(baseContext, currentSettings),
                 onToggleAutoLoad = { enabled ->
                     persistSettings(currentSettings.copy(extensionsAutoLoad = enabled))
-                    if (enabled) {
+                    if (enabled && ArenaOriginGuard.isAuthorizedUrl(webViewRef?.url)) {
                         val script = ArenaAddonManager.buildSiteSdkAndAddonsScript(
                             addons = webViewState.addons,
                             connectedEmail = webViewState.connectedEmail,
@@ -1222,6 +1226,21 @@ fun ArenaWebView(
     onRequestPickDirectory: ((String?) -> Unit) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val latestOnLoginRequested by rememberUpdatedState(onLoginRequested)
+    val latestOnRequestPickDirectory by rememberUpdatedState(onRequestPickDirectory)
+    val fileBridge = remember(hostContext) {
+        ArenaFileBridge(hostContext) { callback -> latestOnRequestPickDirectory(callback) }
+    }
+    val originGuardBridge = remember(hostContext, state, fileBridge) {
+        ArenaOriginGuardBridge(hostContext, state, fileBridge) { url -> latestOnLoginRequested(url) }
+    }
+
+    DisposableEffect(originGuardBridge) {
+        onDispose {
+            originGuardBridge.destroy()
+        }
+    }
+
     AndroidView(
         modifier = modifier.testTag("arena_webview"),
         factory = { _ ->
@@ -1240,7 +1259,7 @@ fun ArenaWebView(
                     setSupportZoom(true)
                     builtInZoomControls = true
                     displayZoomControls = false
-                    allowFileAccess = true
+                    allowFileAccess = false
                     allowContentAccess = true
                     setSupportMultipleWindows(true)
                     javaScriptCanOpenWindowsAutomatically = true
@@ -1260,21 +1279,21 @@ fun ArenaWebView(
                 cookieManager.setAcceptCookie(state.keepSessionCookies)
                 cookieManager.setAcceptThirdPartyCookies(this, state.keepSessionCookies)
 
-                addJavascriptInterface(
-                    ArenaJsInterface(hostContext, state, onLoginRequested),
-                    "AndroidBridge"
-                )
-                addJavascriptInterface(
-                    ArenaFileBridge(hostContext, onRequestPickDirectory),
-                    "ArenaFS"
-                )
+                if (ArenaOriginGuard.isWebMessageBridgeSupported()) {
+                    WebViewCompat.addWebMessageListener(
+                        this,
+                        ArenaOriginGuard.BRIDGE_NAME,
+                        setOf(ArenaOriginGuard.ALLOWED_ORIGIN),
+                        originGuardBridge
+                    )
+                }
 
                 webChromeClient = object : WebChromeClient() {
                     override fun onProgressChanged(view: WebView?, newProgress: Int) {
                         state.progress = newProgress / 100f
                         state.isLoading = newProgress < 100
 
-                        if (newProgress > 60) {
+                        if (newProgress > 60 && ArenaOriginGuard.isAuthorizedUrl(view?.url)) {
                             view?.evaluateJavascript(ArenaJsInterface.SCRIPT_INJECTION, null)
                         }
                     }
@@ -1322,11 +1341,13 @@ fun ArenaWebView(
                         view: WebView?,
                         request: WebResourceRequest?
                     ): Boolean {
-                        val url = request?.url?.toString() ?: return false
+                        val uri = request?.url ?: return false
+                        val url = uri.toString()
+                        val scheme = uri.scheme?.lowercase()
 
-                        if (url.startsWith("tel:") || url.startsWith("mailto:") || url.startsWith("sms:")) {
+                        if (scheme == "tel" || scheme == "mailto" || scheme == "sms") {
                             try {
-                                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
+                                val intent = Intent(Intent.ACTION_VIEW, uri)
                                 hostContext.startActivity(intent)
                                 return true
                             } catch (_: Exception) {
@@ -1334,20 +1355,51 @@ fun ArenaWebView(
                             }
                         }
 
-                        if (ArenaAccountHelper.isLoginOrAuthUrl(url)) {
-                            if (state.autoLoginPromptEnabled && state.connectedEmail.isBlank() && !state.hasPromptedAccountForCurrentAuth) {
-                                state.hasPromptedAccountForCurrentAuth = true
-                                onLoginRequested(url)
+                        if (request.isForMainFrame) {
+                            if (scheme == "file" || scheme == "content") {
                                 return true
-                            } else if (state.connectedEmail.isNotBlank()) {
-                                val hinted = ArenaAccountHelper.appendLoginHintIfGoogleOAuth(url, state.connectedEmail)
-                                if (hinted != url) {
-                                    view?.loadUrl(hinted)
-                                    return true
-                                }
                             }
-                        } else {
-                            state.hasPromptedAccountForCurrentAuth = false
+
+                            if (ArenaOriginGuard.isAuthorizedOrigin(uri)) {
+                                if (ArenaAccountHelper.isLoginOrAuthUrl(url)) {
+                                    if (state.autoLoginPromptEnabled && state.connectedEmail.isBlank() && !state.hasPromptedAccountForCurrentAuth) {
+                                        state.hasPromptedAccountForCurrentAuth = true
+                                        latestOnLoginRequested(url)
+                                        return true
+                                    } else if (state.connectedEmail.isNotBlank()) {
+                                        val hinted = ArenaAccountHelper.appendLoginHintIfGoogleOAuth(url, state.connectedEmail)
+                                        if (hinted != url) {
+                                            view?.loadUrl(hinted)
+                                            return true
+                                        }
+                                    }
+                                } else {
+                                    state.hasPromptedAccountForCurrentAuth = false
+                                }
+                                return false
+                            }
+
+                            if (ArenaOriginGuard.isTrustedAuthNavigation(url)) {
+                                if (state.autoLoginPromptEnabled && state.connectedEmail.isBlank() && !state.hasPromptedAccountForCurrentAuth) {
+                                    state.hasPromptedAccountForCurrentAuth = true
+                                    latestOnLoginRequested(url)
+                                    return true
+                                } else if (state.connectedEmail.isNotBlank()) {
+                                    val hinted = ArenaAccountHelper.appendLoginHintIfGoogleOAuth(url, state.connectedEmail)
+                                    if (hinted != url) {
+                                        view?.loadUrl(hinted)
+                                        return true
+                                    }
+                                }
+                                return false
+                            }
+
+                            if (scheme == "http" || scheme == "https") {
+                                openInExternalBrowser(hostContext, url)
+                                return true
+                            }
+
+                            return true
                         }
 
                         return false
@@ -1372,16 +1424,21 @@ fun ArenaWebView(
                         state.canGoBack = view?.canGoBack() == true
                         state.canGoForward = view?.canGoForward() == true
 
-                        view?.evaluateJavascript(ArenaJsInterface.SCRIPT_INJECTION, null)
-                        val addonsToInject = if (state.extensionsAutoLoad) state.addons else emptyList()
-                        val sdkScript = ArenaAddonManager.buildSiteSdkAndAddonsScript(
-                            addons = addonsToInject,
-                            connectedEmail = state.connectedEmail,
-                            languageCode = state.language
-                        )
-                        view?.evaluateJavascript(sdkScript, null)
+                        if (ArenaOriginGuard.isAuthorizedUrl(url)) {
+                            view?.evaluateJavascript(ArenaJsInterface.SCRIPT_INJECTION, null)
+                            val addonsToInject = if (state.extensionsAutoLoad) state.addons else emptyList()
+                            val sdkScript = ArenaAddonManager.buildSiteSdkAndAddonsScript(
+                                addons = addonsToInject,
+                                connectedEmail = state.connectedEmail,
+                                languageCode = state.language
+                            )
+                            view?.evaluateJavascript(sdkScript, null)
+                        }
 
-                        if (state.connectedEmail.isNotBlank() && url != null && ArenaAccountHelper.isLoginOrAuthUrl(url)) {
+                        if (state.connectedEmail.isNotBlank() && url != null &&
+                            (ArenaOriginGuard.isAuthorizedUrl(url) || ArenaOriginGuard.isTrustedAuthNavigation(url)) &&
+                            ArenaAccountHelper.isLoginOrAuthUrl(url)
+                        ) {
                             ArenaAccountHelper.injectConnectedEmailIntoWebView(view, state.connectedEmail)
                         }
                     }
@@ -1456,6 +1513,8 @@ fun OAuthPopupDialog(
                             settings.apply {
                                 javaScriptEnabled = true
                                 domStorageEnabled = true
+                                allowFileAccess = false
+                                allowContentAccess = false
                                 userAgentString = userAgentString.replace("; wv", "")
                             }
                             val cm = CookieManager.getInstance()
@@ -1468,8 +1527,36 @@ fun OAuthPopupDialog(
                                 }
                             }
                             webViewClient = object : WebViewClient() {
+                                override fun shouldOverrideUrlLoading(
+                                    view: WebView?,
+                                    request: WebResourceRequest?
+                                ): Boolean {
+                                    val uri = request?.url ?: return false
+                                    val scheme = uri.scheme?.lowercase()
+                                    val url = uri.toString()
+                                    if (request.isForMainFrame) {
+                                        if (scheme == "file" || scheme == "content") {
+                                            return true
+                                        }
+                                        if (ArenaOriginGuard.isAuthorizedOrigin(uri) ||
+                                            ArenaOriginGuard.isTrustedAuthNavigation(url)
+                                        ) {
+                                            return false
+                                        }
+                                        if (scheme == "http" || scheme == "https") {
+                                            openInExternalBrowser(hostContext, url)
+                                            return true
+                                        }
+                                        return true
+                                    }
+                                    return false
+                                }
+
                                 override fun onPageFinished(view: WebView?, url: String?) {
-                                    if (connectedEmail.isNotBlank() && url != null && ArenaAccountHelper.isLoginOrAuthUrl(url)) {
+                                    if (connectedEmail.isNotBlank() && url != null &&
+                                        (ArenaOriginGuard.isAuthorizedUrl(url) || ArenaOriginGuard.isTrustedAuthNavigation(url)) &&
+                                        ArenaAccountHelper.isLoginOrAuthUrl(url)
+                                    ) {
                                         ArenaAccountHelper.injectConnectedEmailIntoWebView(view, connectedEmail)
                                     }
                                 }
