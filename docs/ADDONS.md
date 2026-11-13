@@ -9,8 +9,8 @@ Estrutura recomendada:
 ```text
 ArenaAI/
 ├── settings.json
-├── documento.md
-├── extencao/
+├── document.md
+├── extension/
 │   ├── meu-tema/
 │   │   ├── manifest.json
 │   │   ├── index.js
@@ -24,7 +24,7 @@ ArenaAI/
 
 Os nomes de diretório reconhecidos incluem:
 
-- extensões: `extencao/` e `extensão/`;
+- extensões: ``extensions/`, `extencao/` e `extensão/`;
 - plugins: `plugin/` e `plugins/`.
 
 O carregador procura arquivos `.js`, `.mjs` e `.json`. Um diretório de complemento pode conter `manifest.json` e arquivos de entrada/estilo referenciados por ele.
@@ -71,7 +71,7 @@ O campo `type` pode usar `extension`, `plugin`, `extensao` ou `extensão`. Os no
 
 ## Formato B — arquivo JavaScript único
 
-Um arquivo `.js` ou `.mjs` pode ser colocado diretamente em `extencao/` ou `plugin/`. O cabeçalho utiliza comentários `@tag valor`:
+Um arquivo `.js` ou `.mjs` pode ser colocado diretamente em `extension/` ou `plugin/`. O cabeçalho utiliza comentários `@tag valor`:
 
 ```javascript
 // ==ArenaAI==
