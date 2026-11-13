@@ -174,17 +174,20 @@
     box.appendChild(search);
     var list = el('div', { class: 'ma-model-list' });
     box.appendChild(list);
-    function paint(filter) {
+    var visibleLimit = 100;
+    function paint(filter, resetLimit) {
+      if (resetLimit) visibleLimit = 100;
       list.replaceChildren();
       var q = safeText(filter).toLowerCase().trim();
       var filtered = state.models.filter(function (m) {
         return !q || safeText(m.id).toLowerCase().includes(q) || safeText(m.name).toLowerCase().includes(q);
-      }).slice(0, 100);
+      });
+      var visibleModels = filtered.slice(0, visibleLimit);
       if (!filtered.length) {
         list.appendChild(el('div', { class: 'ma-empty', text: 'Nenhum modelo encontrado.' }));
         return;
       }
-      filtered.forEach(function (m) {
+      visibleModels.forEach(function (m) {
         var item = el('div', { class: 'ma-modelitem' });
         var row = el('button', { class: 'ma-modelrow' + (m.id === state.selected[state.agent] ? ' selected' : '') });
         var label = el('div', { class: 'ma-modelname' });
@@ -204,9 +207,12 @@
         item.appendChild(details);
         list.appendChild(item);
       });
+      if (filtered.length > visibleModels.length) {
+        list.appendChild(el('button', { class: 'ma-btn', block: 'true', text: 'Carregar mais modelos (' + (filtered.length - visibleModels.length) + ' restantes)', onclick: function () { visibleLimit += 100; paint(search.value, false); } }));
+      }
     }
-    search.addEventListener('input', function () { paint(search.value); });
-    paint('');
+    search.addEventListener('input', function () { paint(search.value, true); });
+    paint('', true);
     return box;
   }
 
